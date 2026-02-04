@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""
+Professional Instrument Control Library
+
+A comprehensive, enterprise-grade Python library for controlling laboratory
+and test equipment with precision and reliability.
+
+Author: Professional Instrument Control Team
+Version: 1.0.1
+License: MIT
+"""
+
+__version__ = "1.0.1"
+__author__ = "Professional Instrument Control Team"
+__email__ = "support@example.com"
+__license__ = "MIT"
+__description__ = "Professional-grade instrument control library for laboratory automation"
+
+# Import main instrument control classes for convenient access
+# Note: Lazy imports to avoid loading all modules when only one is needed
+def __getattr__(name):
+    """Lazy import of instrument modules to avoid loading everything at once."""
+    if name in ["KeithleyPowerSupply", "KeithleyPowerSupplyError"]:
+        from .keithley_power_supply import KeithleyPowerSupply, KeithleyPowerSupplyError
+        return KeithleyPowerSupply if name == "KeithleyPowerSupply" else KeithleyPowerSupplyError
+
+    elif name in ["KeithleyDMM6500", "KeithleyDMM6500Error", "MeasurementFunction"]:
+        from .keithley_dmm import KeithleyDMM6500, KeithleyDMM6500Error, MeasurementFunction
+        if name == "KeithleyDMM6500":
+            return KeithleyDMM6500
+        elif name == "KeithleyDMM6500Error":
+            return KeithleyDMM6500Error
+        else:
+            return MeasurementFunction
+
+    elif name in ["Keithley2380", "Keithley2380Error"]:
+        from .keithley_load import Keithley2380, Keithley2380Error
+        return Keithley2380 if name == "Keithley2380" else Keithley2380Error
+
+    elif name in ["KeysightDSOX6004A", "KeysightDSOX6004AError"]:
+        from .keysight_oscilloscope import KeysightDSOX6004A, KeysightDSOX6004AError
+        return KeysightDSOX6004A if name == "KeysightDSOX6004A" else KeysightDSOX6004AError
+
+    elif name in ["KeysightHD304MSO", "KeysightHD304MSOError"]:
+        from .keysight_oscilloscope import KeysightHD304MSO, KeysightHD304MSOError
+        return KeysightHD304MSO if name == "KeysightHD304MSO" else KeysightHD304MSOError
+
+    elif name in ["TektronixMSO24", "TektronixMSO24Error"]:
+        from .tektronix_oscilloscope import TektronixMSO24, TektronixMSO24Error
+        return TektronixMSO24 if name == "TektronixMSO24" else TektronixMSO24Error
+
+    elif name in ["scan_and_identify_instruments", "list_available_instruments", "classify_instrument_type"]:
+        from .scpi_wrapper import scan_and_identify_instruments, list_available_instruments, classify_instrument_type
+        if name == "scan_and_identify_instruments":
+            return scan_and_identify_instruments
+        elif name == "list_available_instruments":
+            return list_available_instruments
+        else:
+            return classify_instrument_type
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+__all__ = [
+    # Version information
+    "__version__",
+    "__author__",
+    "__email__",
+    "__license__",
+    "__description__",
+
+    # Keithley Power Supply classes
+    "KeithleyPowerSupply",
+    "KeithleyPowerSupplyError",
+
+    # Keithley Electronic Load classes
+    "Keithley2380",
+    "Keithley2380Error",
+
+    # Keithley Multimeter classes
+    "KeithleyDMM6500",
+    "KeithleyDMM6500Error",
+    "MeasurementFunction",
+
+    # Keysight Oscilloscope classes
+    "KeysightDSOX6004A",
+    "KeysightDSOX6004AError",
+    "KeysightHD304MSO",
+    "KeysightHD304MSOError",
+
+    # Tektronix Oscilloscope classes
+    "TektronixMSO24",
+    "TektronixMSO24Error",
+
+    # Auto-detection utilities
+    "scan_and_identify_instruments",
+    "list_available_instruments",
+    "classify_instrument_type",
+]
+
+# Library information
+LIBRARY_INFO = {
+    "name": "Professional Instrument Control Library",
+    "version": __version__,
+    "author": __author__,
+    "license": __license__,
+    "description": __description__,
+    "supported_instruments": {
+        "power_supplies": [
+            "Keithley 2230 Series",
+            "Keithley 2231A Series", 
+            "Keithley 2280S Series",
+            "Keithley 2260B/2268 Series"
+        ],
+        "multimeters": [
+            "Keithley DMM6500",
+            "Keithley DMM7510"
+        ],
+        "oscilloscopes": [
+            "Keysight DSOX6000 Series (DSOX6004A)",
+            "Keysight InfiniiVision HD3 Series (HD304MSO)",
+            "Tektronix MSO2 Series (MSO24)"
+        ]
+    }
+}
+
+
+def get_library_info() -> dict:
+    """
+    Get comprehensive library information.
+
+    Returns:
+        Dictionary containing library metadata and capabilities
+    """
+    return LIBRARY_INFO.copy()
+
+
+def check_dependencies() -> dict:
+    """
+    Check availability of required dependencies.
+
+    Returns:
+        Dictionary with dependency status information
+    """
+    dependencies = {}
+
+    # Check PyVISA
+    try:
+        import pyvisa
+        dependencies['pyvisa'] = {
+            'available': True,
+            'version': pyvisa.__version__,
+            'backends': []
+        }
+
+        # Check available VISA backends
+        try:
+            rm = pyvisa.ResourceManager()
+            dependencies['pyvisa']['backends'].append('Default')
+            rm.close()
+        except:
+            pass
+
+        try:
+            rm = pyvisa.ResourceManager('@py')
+            dependencies['pyvisa']['backends'].append('PyVISA-py')
+            rm.close()
+        except:
+            pass
+
+    except ImportError:
+        dependencies['pyvisa'] = {
+            'available': False,
+            'error': 'PyVISA not installed'
+        }
+
+    # Check NumPy
+    try:
+        import numpy
+        dependencies['numpy'] = {
+            'available': True,
+            'version': numpy.__version__
+        }
+    except ImportError:
+        dependencies['numpy'] = {
+            'available': False,
+            'error': 'NumPy not installed'
+        }
+
+    # Check optional dependencies
+    optional_deps = ['scipy', 'matplotlib', 'pandas', 'gradio']
+    for dep in optional_deps:
+        try:
+            module = __import__(dep)
+            dependencies[dep] = {
+                'available': True,
+                'version': getattr(module, '__version__', 'unknown'),
+                'optional': True
+            }
+        except ImportError:
+            dependencies[dep] = {
+                'available': False,
+                'error': f'{dep} not installed',
+                'optional': True
+            }
+
+    return dependencies
+
+
+def get_oscilloscope_comparison() -> dict:
+    """
+    Get comparison between supported oscilloscope models.
+
+    Returns:
+        Dictionary comparing oscilloscope specifications and capabilities
+    """
+    return {
+        "keysight_dsox6004a": {
+            "manufacturer": "Keysight Technologies",
+            "model": "DSOX6004A",
+            "series": "InfiniiVision 6000 X-Series",
+            "bandwidth": "1 GHz",
+            "channels": 4,
+            "sample_rate": "20 GS/s",
+            "memory_depth": "16 Mpts",
+            "resolution": "8-bit",
+            "function_generators": 2,
+            "digital_channels": 0,
+            "key_features": [
+                "High bandwidth (1 GHz)",
+                "Dual function generators",
+                "Advanced trigger modes",
+                "Math functions",
+                "High sample rate"
+            ]
+        },
+        "keysight_hd304mso": {
+            "manufacturer": "Keysight Technologies",
+            "model": "HD304MSO",
+            "series": "InfiniiVision HD3 Series",
+            "bandwidth": "200 MHz (upgradeable to 1 GHz)",
+            "channels": 4,
+            "sample_rate": "2.5 GS/s",
+            "memory_depth": "100 Mpts",
+            "resolution": "14-bit",
+            "function_generators": 2,
+            "digital_channels": 16,
+            "key_features": [
+                "14-bit ADC resolution (vs 8-bit)",
+                "Mixed signal capability (16 digital channels)",
+                "Large memory depth (100 Mpts)",
+                "Up to 4 graticules display",
+                "Dual frequency counters",
+                "1.3M waveforms/sec update rate"
+            ]
+        },
+        "tektronix_mso24": {
+            "manufacturer": "Tektronix",
+            "model": "MSO24",
+            "series": "2-Series MSO",
+            "bandwidth": "200 MHz",
+            "channels": 4,
+            "sample_rate": "2.5 GS/s",
+            "memory_depth": "62.5 Mpts",
+            "resolution": "8-bit",
+            "function_generators": 1,
+            "digital_channels": 16,
+            "key_features": [
+                "Mixed signal capability (16 digital channels)",
+                "Large memory depth (62.5 Mpts)",
+                "Built-in AFG",
+                "Comprehensive measurement suite",
+                "Professional test automation"
+            ]
+        }
+    }
+
+
+def get_recommended_usage() -> dict:
+    """
+    Get recommended usage scenarios for each oscilloscope.
+
+    Returns:
+        Dictionary with recommended applications for each model
+    """
+    return {
+        "keysight_dsox6004a": [
+            "High-frequency signal analysis (up to 1 GHz)",
+            "RF and microwave applications",
+            "High-speed digital signal validation",
+            "Advanced signal generation requirements",
+            "Applications requiring maximum bandwidth"
+        ],
+        "keysight_hd304mso": [
+            "High-resolution measurements (14-bit ADC)",
+            "Mixed signal debugging (analog + digital)",
+            "Power integrity analysis",
+            "Applications requiring high vertical resolution",
+            "Long memory depth captures (100 Mpts)",
+            "Multi-channel synchronized analysis (4 graticules)"
+        ],
+        "tektronix_mso24": [
+            "Mixed signal debugging (analog + digital)",
+            "Embedded system development",
+            "Long duration signal capture",
+            "Educational and training applications",
+            "Cost-effective professional testing",
+            "Applications with moderate bandwidth requirements"
+        ]
+    }
+
+
+# Convenience function for quick instrument selection
+def create_oscilloscope(model: str, visa_address: str, **kwargs):
+    """
+    Factory function to create oscilloscope instances.
+
+    Args:
+        model: Oscilloscope model ("keysight_dsox6004a", "keysight_hd304mso", or "tektronix_mso24")
+        visa_address: VISA address for the instrument
+        **kwargs: Additional arguments passed to the constructor
+
+    Returns:
+        Oscilloscope instance
+
+    Raises:
+        ValueError: If model is not supported
+    """
+    model = model.lower().replace("-", "_").replace(" ", "_")
+
+    if model in ["keysight_dsox6004a", "dsox6004a"]:
+        return KeysightDSOX6004A(visa_address, **kwargs)
+    elif model in ["keysight_hd304mso", "hd304mso", "hd3"]:
+        return KeysightHD304MSO(visa_address, **kwargs)
+    elif model in ["tektronix_mso24", "mso24", "tektronix"]:
+        return TektronixMSO24(visa_address, **kwargs)
+    else:
+        raise ValueError(f"Unsupported oscilloscope model: {model}. "
+                        f"Supported models: keysight_dsox6004a, keysight_hd304mso, tektronix_mso24")
+
+
+# Professional instrument control best practices
+BEST_PRACTICES = {
+    "connection_management": [
+        "Always use try-catch blocks for VISA operations",
+        "Implement proper timeout management for long operations",
+        "Use context managers or ensure proper disconnect() calls",
+        "Verify instrument identification after connection"
+    ],
+    "measurement_automation": [
+        "Configure channels before starting measurements",
+        "Use appropriate trigger settings for stable acquisition",
+        "Implement error checking for measurement validity",
+        "Save configuration state for reproducible results"
+    ],
+    "data_handling": [
+        "Use professional file naming conventions with timestamps",
+        "Implement proper data validation and error checking",
+        "Provide comprehensive metadata with exported data",
+        "Use appropriate data formats (CSV, binary) for the application"
+    ],
+    "thread_safety": [
+        "Use locks for multi-threaded instrument access",
+        "Implement proper exception handling in threads",
+        "Avoid simultaneous SCPI commands to the same instrument",
+        "Use queues for data sharing between threads"
+    ]
+}
+
+
+def get_best_practices() -> dict:
+    """
+    Get professional instrument control best practices.
+    
+    Returns:
+        Dictionary containing best practice guidelines
+    """
+    return BEST_PRACTICES.copy()
