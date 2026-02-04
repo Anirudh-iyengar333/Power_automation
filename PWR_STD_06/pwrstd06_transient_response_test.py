@@ -229,17 +229,17 @@ class PWRSTD06TransientTest:
     SCOPE_CONFIG = {
         #                  v_scale    timebase    trigger_up       trigger_down    bandwidth
         #                  (V/div)    (s/div)     (V) FALLING      (V) RISING      (MHz)
-        # ─── FILL IN YOUR TRIGGER VALUES BELOW ───────────────────────────────────
-        "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.230, "trigger_down": 3.310, "bandwidth_mhz": 20},
+        # ─── TRIGGER VALUES FROM TEST MEASUREMENTS ───────────────────────────────
+        "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
         "2V5":    {"v_scale": 0.020, "timebase": 100e-6, "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
-        "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.726, "trigger_down": 1.829,  "bandwidth_mhz": 20},
-        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "1V35":   {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "1V_PS":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "1V_PL":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "1V1_E0": {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "2V5_E0": {"v_scale": 0.020, "timebase": 100e-6, "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
-        "1V8_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.000, "trigger_down": 0.000, "bandwidth_mhz": 20},  # <-- FILL IN
+        "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81,  "bandwidth_mhz": 20},
+        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},  # Similar to 3V3
+        "1V35":   {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
+        "1V_PS":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.933, "trigger_down": 1.024, "bandwidth_mhz": 20},
+        "1V_PL":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
+        "1V1_E0": {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 1.071, "trigger_down": 1.112, "bandwidth_mhz": 20},
+        "2V5_E0": {"v_scale": 0.020, "timebase": 100e-6, "trigger_up": 2.492, "trigger_down": 2.51, "bandwidth_mhz": 20},
+        "1V8_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81, "bandwidth_mhz": 20},  # Similar to 1V8
     }
 
     def __init__(self,
