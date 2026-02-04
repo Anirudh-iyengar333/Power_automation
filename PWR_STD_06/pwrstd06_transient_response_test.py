@@ -168,6 +168,127 @@ class RailTestResult:
         }
 
 
+# ── Interactive Rail Selector ────────────────────────────────────────────
+# Shows a checkbox list in the terminal.  Use UP/DOWN to move, TAB to
+# toggle a rail, A to select/deselect all, ENTER to confirm, Q to quit.
+
+def _enable_ansi():
+    """Enable ANSI escape sequences on Windows 10+"""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except Exception:
+        pass
+
+
+def interactive_rail_selector(rail_configs):
+    """
+    Interactive multi-select rail selector.
+
+    Controls
+    --------
+    UP / DOWN   Navigate
+    TAB / SPACE Toggle selection
+    A           Select all / Deselect all
+    ENTER       Confirm and run selected rails
+    Q / ESC     Cancel
+
+    Parameters
+    ----------
+    rail_configs : list[RailConfig]
+
+    Returns
+    -------
+    list[str] | None
+        Selected rail names, or None if cancelled.
+    """
+    import msvcrt
+
+    _enable_ansi()
+
+    rails = []
+    for r in rail_configs:
+        rails.append({
+            'name': r.name,
+            'tp': r.test_point,
+            'voltage': r.expected_voltage_v,
+            'low': r.low_current_ma,
+            'high': r.high_current_ma,
+        })
+
+    selected = [False] * len(rails)  # none selected – TAB to pick rails
+    cursor = 0
+
+    def render():
+        lines = []
+        lines.append("")
+        lines.append("  RAIL SELECTION")
+        lines.append("  " + "=" * 62)
+        lines.append("  UP/DOWN: Navigate | TAB: Toggle | ENTER: Run | A: All | Q: Quit")
+        lines.append("")
+        for i, r in enumerate(rails):
+            marker = "[X]" if selected[i] else "[ ]"
+            arrow  = ">>" if i == cursor else "  "
+            lines.append(
+                f"  {arrow} {marker} {r['name']:<10} ({r['tp']:<5}) "
+                f"{r['voltage']:>5.2f}V   {r['low']} -> {r['high']}mA"
+            )
+        sel_names = [rails[i]['name'] for i in range(len(rails)) if selected[i]]
+        lines.append("")
+        if sel_names:
+            lines.append(f"  Selected: {', '.join(sel_names)}  ({len(sel_names)} rails)")
+        else:
+            lines.append("  Selected: None  (use TAB to select rails)")
+        return lines
+
+    # initial draw
+    display_lines = render()
+    for line in display_lines:
+        print(line)
+    sys.stdout.flush()
+
+    while True:
+        key = msvcrt.getch()
+
+        if key == b'\r':                              # ENTER
+            sel = [rails[i]['name'] for i in range(len(rails)) if selected[i]]
+            if not sel:
+                continue                              # need at least one
+            print()
+            return sel
+
+        elif key == b'\t' or key == b' ':             # TAB / SPACE
+            selected[cursor] = not selected[cursor]
+
+        elif key in (b'a', b'A'):                     # toggle all
+            if all(selected):
+                selected = [False] * len(rails)
+            else:
+                selected = [True] * len(rails)
+
+        elif key == b'\xe0' or key == b'\x00':        # arrow prefix
+            key2 = msvcrt.getch()
+            if key2 == b'H':                          # UP
+                cursor = (cursor - 1) % len(rails)
+            elif key2 == b'P':                        # DOWN
+                cursor = (cursor + 1) % len(rails)
+
+        elif key in (b'q', b'Q', b'\x1b'):            # Q / ESC
+            print("\n  Selection cancelled.")
+            return None
+
+        else:
+            continue
+
+        # redraw in-place
+        display_lines = render()
+        sys.stdout.write(f"\033[{len(display_lines)}A")
+        for line in display_lines:
+            sys.stdout.write(f"\033[2K{line}\n")
+        sys.stdout.flush()
+
+
 # This is the main class - the "brain" that runs the entire test
 class PWRSTD06TransientTest:
     """
@@ -231,14 +352,14 @@ class PWRSTD06TransientTest:
         #                  (V/div)    (s/div)     (V) FALLING      (V) RISING      (MHz)
         # ─── TRIGGER VALUES FROM TEST MEASUREMENTS ───────────────────────────────
         "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
-        "2V5":    {"v_scale": 0.020, "timebase": 100e-6, "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
+        "2V5":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
         "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81,  "bandwidth_mhz": 20},
         "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},  # Similar to 3V3
-        "1V35":   {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
-        "1V_PS":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.933, "trigger_down": 1.024, "bandwidth_mhz": 20},
-        "1V_PL":  {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
-        "1V1_E0": {"v_scale": 0.020, "timebase": 50e-6,  "trigger_up": 1.071, "trigger_down": 1.112, "bandwidth_mhz": 20},
-        "2V5_E0": {"v_scale": 0.020, "timebase": 100e-6, "trigger_up": 2.492, "trigger_down": 2.51, "bandwidth_mhz": 20},
+        "1V35":   {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
+        "1V_PS":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.936, "trigger_down": 1.024, "bandwidth_mhz": 20},
+        "1V_PL":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
+        "1V1_E0": {"v_scale": 0.010, "timebase": 50e-6,  "trigger_up": 1.075, "trigger_down": 1.112, "bandwidth_mhz": 20},
+        "2V5_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.445, "trigger_down": 2.512, "bandwidth_mhz": 20},
         "1V8_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81, "bandwidth_mhz": 20},  # Similar to 1V8
     }
 
@@ -414,15 +535,16 @@ class PWRSTD06TransientTest:
             )
             self._logger.info(f"  Trigger: FALLING edge at {trigger_up:.3f}V (NORMAL sweep)")
 
-            # ── BANDWIDTH LIMIT ──
-            # Set bandwidth limit to reduce noise and improve measurement accuracy
-            bandwidth_mhz = cfg.get("bandwidth_mhz", 20)
-            if bandwidth_mhz and hasattr(self._scope, 'set_bandwidth'):
-                try:
-                    self._scope.set_bandwidth(bandwidth_mhz)
-                    self._logger.info(f"  Bandwidth: {bandwidth_mhz}MHz")
-                except Exception as e:
-                    self._logger.warning(f"  Could not set bandwidth: {e}")
+            # ── BANDWIDTH LIMIT  (20 MHz on DSOX6004A) ──
+            # SCPI: :CHANnel<n>:BWLimit {ON|OFF}
+            #   ON  = 20 MHz low-pass filter (reduces noise for transient capture)
+            #   OFF = full bandwidth
+            try:
+                self._scope._scpi_wrapper.write(":CHANnel1:BWLimit ON")
+                time.sleep(0.05)
+                self._logger.info("  Bandwidth limit: 20 MHz (CHANnel1:BWLimit ON)")
+            except Exception as e:
+                self._logger.warning(f"  Could not set bandwidth limit: {e}")
 
             self._logger.info(f"Scope ready for {rail.name}: {rail.low_current_ma}mA -> {rail.high_current_ma}mA")
             self._logger.info(f"  Limits: Droop<{rail.max_droop_mv}mV, Recovery<{rail.max_recovery_time_us}us")
@@ -1308,25 +1430,36 @@ class PWRSTD06TransientTest:
 
         # Determine which rails to test
         if rails:
+            # Specific rails passed in (from command line or caller)
             rails_to_test = [r for r in self.RAIL_CONFIGS if r.name in rails]
         else:
-            rails_to_test = self.RAIL_CONFIGS
+            # Interactive selector – user picks with TAB + ENTER
+            selected_names = interactive_rail_selector(self.RAIL_CONFIGS)
+            if selected_names is None:
+                print("Test cancelled by user.")
+                self.disconnect_instruments()
+                return False
+            rails_to_test = [r for r in self.RAIL_CONFIGS if r.name in selected_names]
 
         print(f"\nRails to test ({len(rails_to_test)}):")
         for i, rail in enumerate(rails_to_test, 1):
             print(f"  {i}. {rail.name} ({rail.test_point}): {rail.load_step_positive}")
+        print()
 
-        print("\n" + "-" * 70)
-        print("INSTRUCTIONS:")
-        print("  - For each rail, you will be asked to confirm connection")
-        print("  - Type 'yes' or 'y' to proceed with testing")
-        print("  - Type 'skip' to skip to the next rail")
-        print("  - Type 'quit' to end the test")
-        print("-" * 70 + "\n")
-
-        # Test each rail
+        # Test each selected rail
         for i, rail in enumerate(rails_to_test, 1):
-            print(f"\n[{i}/{len(rails_to_test)}] Ready to test: {rail.name} ({rail.test_point})")
+            # ── PSU check before each rail ──
+            print(f"\n{'─' * 70}")
+            print(f"  [{i}/{len(rails_to_test)}]  RAIL: {rail.name} ({rail.test_point})")
+            print(f"{'─' * 70}")
+            psu_ok = input("    Is the PSU powered ON? (yes/no): ").strip().lower()
+            if psu_ok not in ['yes', 'y']:
+                print("    Please turn ON the PSU and try again.")
+                psu_ok = input("    PSU is ON now? (yes/quit): ").strip().lower()
+                if psu_ok not in ['yes', 'y']:
+                    print("\n    Test sequence ended – PSU not ready.")
+                    break
+
             print(f"    Expected voltage: {rail.expected_voltage_v}V")
             print(f"    Load step: {rail.load_step_positive}")
             print()
@@ -1338,11 +1471,9 @@ class PWRSTD06TransientTest:
                 response = input(f"    Connected to {rail.name}? (yes/skip/quit): ").strip().lower()
 
                 if response in ['yes', 'y']:
-                    # Run the test
                     result = self.test_single_rail(rail)
                     self.results.append(result)
 
-                    # Display quick result
                     status_symbol = "[PASS]" if result.overall_result == "PASS" else "[FAIL]"
                     print(f"\n    {status_symbol} {rail.name} test complete!")
                     break
@@ -1402,30 +1533,33 @@ class PWRSTD06TransientTest:
 
         self._logger.info(f"JSON report saved: {json_path}")
 
-        # CSV report (with reference to detailed calculation files)
+        # CSV report (droop-focused with trigger values)
         csv_path = self.reports_dir / f"pwrstd06_results_{timestamp}.csv"
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([
-                'Rail', 'Step', 'Load_Step_mA', 'Droop_mV', 'Recovery_us',
-                'Ringing', 'Result', 'Notes', 'Calculation_File'
+                'Rail', 'Step', 'Load_Step_mA', 'DV_Droop_or_Rise_mV',
+                'Trigger', 'Result', 'Calculation_File'
             ])
 
             for result in self.results:
                 for step in [result.positive_step, result.negative_step]:
                     if step:
-                        # Generate calculation file reference (timestamp holds dir_label)
                         calc_file = f"{step.rail_name}_{step.timestamp}_calculations.txt"
+                        cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                        if step.step_direction == "POSITIVE":
+                            trigger_val = cfg.get("trigger_up", "")
+                        else:
+                            trigger_val = cfg.get("trigger_down", "")
+                        trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
                         writer.writerow([
                             result.rail_name,
                             step.step_direction,
                             step.load_step_description,
                             f"{step.droop_mv:.1f}",
-                            f"{step.recovery_time_us:.1f}",
-                            'Y' if step.has_ringing else 'N',
+                            trigger_str,
                             step.result,
-                            step.notes,
-                            f"../calculations/{calc_file}"  # Relative path to calculation file
+                            f"../calculations/{calc_file}"
                         ])
 
         self._logger.info(f"CSV report saved: {csv_path}")
@@ -1480,7 +1614,7 @@ class PWRSTD06TransientTest:
         self._logger.info(f"Calculation index saved: {calc_index_path}")
 
     def _generate_summary_text(self) -> str:
-        """Generate text summary of results"""
+        """Generate text summary of results in table format"""
         lines = []
         lines.append("=" * 80)
         lines.append("PWRSTD06 TRANSIENT RESPONSE TEST SUMMARY")
@@ -1504,52 +1638,89 @@ class PWRSTD06TransientTest:
             lines.append(f"         {not_tested} rails not tested")
         lines.append("")
 
-        # Low to High load step results
-        lines.append("-" * 80)
-        lines.append("LOAD UP RESULTS (Low -> High)")
-        lines.append("-" * 80)
-        lines.append(f"{'Rail':<10} {'Load Step':<15} {'Droop':<12} {'Recovery':<12} {'Ringing':<8} {'Result':<8}")
-        lines.append("-" * 80)
+        # ── LOW TO HIGH table ──
+        col_w = {"rail": 10, "step": 16, "droop": 16, "trigger": 10}
+        table_w = col_w["rail"] + col_w["step"] + col_w["droop"] + col_w["trigger"] + 7  # separators
+
+        lines.append("LOW TO HIGH (Load Up)")
+        lines.append("=" * table_w)
+        lines.append(
+            f" {'Rail':<{col_w['rail']}}| {'Load Step':<{col_w['step']}}| "
+            f"{'DV Droop':<{col_w['droop']}}| {'Trigger':<{col_w['trigger']}}"
+        )
+        lines.append(
+            f" {'':_<{col_w['rail']}}|{'':_<{col_w['step']+1}}|"
+            f"{'':_<{col_w['droop']+1}}|{'':_<{col_w['trigger']+1}}"
+        )
+        lines.append(
+            f" {'':>{col_w['rail']}}| {'(mA)':<{col_w['step']}}| "
+            f"{'(mV)':<{col_w['droop']}}| {'':>{col_w['trigger']}}"
+        )
+        lines.append("-" * table_w)
 
         for result in self.results:
             if result.positive_step:
                 step = result.positive_step
+                cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                trigger_val = cfg.get("trigger_up", "")
+                trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
                 lines.append(
-                    f"{result.rail_name:<10} {step.load_step_description:<15} "
-                    f"{step.droop_mv:>6.1f}mV    {step.recovery_time_us:>6.1f}us    "
-                    f"{'Y' if step.has_ringing else 'N':<8} {step.result:<8}"
+                    f" {result.rail_name:<{col_w['rail']}}| "
+                    f"{step.load_step_description:<{col_w['step']}}| "
+                    f"{step.droop_mv:<{col_w['droop']}.1f}| "
+                    f"{trigger_str:<{col_w['trigger']}}"
                 )
             else:
-                lines.append(f"{result.rail_name:<10} {'NOT TESTED':<15}")
+                lines.append(
+                    f" {result.rail_name:<{col_w['rail']}}| {'NOT TESTED':<{col_w['step']}}| "
+                    f"{'':<{col_w['droop']}}| {'':<{col_w['trigger']}}"
+                )
 
+        lines.append("=" * table_w)
         lines.append("")
 
-        # High to Low load step results
-        lines.append("-" * 80)
-        lines.append("LOAD DOWN RESULTS (High -> Low)")
-        lines.append("-" * 80)
-        lines.append(f"{'Rail':<10} {'Load Step':<15} {'Droop':<12} {'Recovery':<12} {'Ringing':<8} {'Result':<8}")
-        lines.append("-" * 80)
+        # ── HIGH TO LOW table ──
+        lines.append("HIGH TO LOW (Load Down)")
+        lines.append("=" * table_w)
+        lines.append(
+            f" {'Rail':<{col_w['rail']}}| {'Load Step':<{col_w['step']}}| "
+            f"{'DV Rise':<{col_w['droop']}}| {'Trigger':<{col_w['trigger']}}"
+        )
+        lines.append(
+            f" {'':_<{col_w['rail']}}|{'':_<{col_w['step']+1}}|"
+            f"{'':_<{col_w['droop']+1}}|{'':_<{col_w['trigger']+1}}"
+        )
+        lines.append(
+            f" {'':>{col_w['rail']}}| {'(mA)':<{col_w['step']}}| "
+            f"{'(mV)':<{col_w['droop']}}| {'':>{col_w['trigger']}}"
+        )
+        lines.append("-" * table_w)
 
         for result in self.results:
             if result.negative_step:
                 step = result.negative_step
+                cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                trigger_val = cfg.get("trigger_down", "")
+                trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
                 lines.append(
-                    f"{result.rail_name:<10} {step.load_step_description:<15} "
-                    f"{step.droop_mv:>6.1f}mV    {step.recovery_time_us:>6.1f}us    "
-                    f"{'Y' if step.has_ringing else 'N':<8} {step.result:<8}"
+                    f" {result.rail_name:<{col_w['rail']}}| "
+                    f"{step.load_step_description:<{col_w['step']}}| "
+                    f"{step.droop_mv:<{col_w['droop']}.1f}| "
+                    f"{trigger_str:<{col_w['trigger']}}"
                 )
             else:
-                lines.append(f"{result.rail_name:<10} {'NOT TESTED':<15}")
+                lines.append(
+                    f" {result.rail_name:<{col_w['rail']}}| {'NOT TESTED':<{col_w['step']}}| "
+                    f"{'':<{col_w['droop']}}| {'':<{col_w['trigger']}}"
+                )
 
+        lines.append("=" * table_w)
         lines.append("")
-        lines.append("=" * 80)
 
         # Overall assessment
         if failed == 0 and not_tested == 0:
             lines.append("OVERALL TEST RESULT: PASS")
-            lines.append("All rails meet droop, recovery, and overshoot limits.")
-            lines.append("No sustained ringing or oscillation detected.")
+            lines.append("All rails meet droop limits.")
         elif failed > 0:
             lines.append("OVERALL TEST RESULT: FAIL")
             lines.append(f"{failed} rail(s) failed to meet specifications.")
@@ -1557,19 +1728,14 @@ class PWRSTD06TransientTest:
             lines.append("OVERALL TEST RESULT: INCOMPLETE")
             lines.append(f"{not_tested} rail(s) were not tested.")
 
-        lines.append("=" * 80)
+        lines.append("=" * table_w)
+        lines.append("")
+        lines.append("Note: DV Droop (Low->High) = DC_RMS_FS - VMIN")
+        lines.append("      DV Rise  (High->Low) = VMAX - DC_RMS_FS")
         lines.append("")
         lines.append("DETAILED CALCULATION FILES:")
-        lines.append("  For step-by-step calculation details showing exactly how each")
-        lines.append("  measurement was derived from the waveform data, see the")
-        lines.append("  'calculations' folder. Each test has a dedicated file with:")
-        lines.append("    - Baseline voltage calculation")
-        lines.append("    - Droop measurement (with actual min/max voltages)")
-        lines.append("    - Recovery time calculation (settlement criteria)")
-        lines.append("    - Overshoot measurement (with actual peak voltages)")
-        lines.append("    - Ringing detection analysis (RMS/peak ratios)")
-        lines.append("  See calculations/README.txt for a complete index.")
-        lines.append("=" * 80)
+        lines.append("  See 'calculations' folder for step-by-step measurement breakdowns.")
+        lines.append("=" * table_w)
 
         return "\n".join(lines)
 

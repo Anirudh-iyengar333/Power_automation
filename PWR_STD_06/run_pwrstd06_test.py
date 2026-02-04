@@ -6,20 +6,139 @@ Simple runner script for PWRSTD06 transient response testing with auto-detection
 of VISA instruments.
 
 Usage:
-    python run_pwrstd06_test.py                    # Auto-detect instruments
+    python run_pwrstd06_test.py                    # Interactive rail selection
     python run_pwrstd06_test.py --scope <addr>     # Specify scope address
     python run_pwrstd06_test.py --load <addr>      # Specify load address
     python run_pwrstd06_test.py --list             # List available instruments
-    python run_pwrstd06_test.py --rails 3V6,3V3    # Test specific rails only
+    python run_pwrstd06_test.py --rails 3V6,3V3    # Test specific rails only (skip selector)
 """
 
 import sys
+import os
 import argparse
 from pathlib import Path
 
 # Add parent directory for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 sys.path.insert(0, str(Path(__file__).parent))
+
+
+def _enable_ansi():
+    """Enable ANSI escape codes on Windows 10+"""
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except Exception:
+        pass
+
+
+def interactive_rail_selector(rail_configs):
+    """
+    Interactive multi-select rail selector.
+
+    Controls:
+        UP/DOWN arrows  - Navigate between rails
+        TAB or SPACE    - Toggle selection on/off
+        A               - Select all / Deselect all
+        ENTER           - Confirm and run selected rails
+        Q or ESC        - Cancel
+
+    Args:
+        rail_configs: List of RailConfig objects from the test class
+
+    Returns:
+        List of selected rail names, or None if cancelled
+    """
+    import msvcrt
+
+    _enable_ansi()
+
+    rails = []
+    for r in rail_configs:
+        rails.append({
+            'name': r.name,
+            'tp': r.test_point,
+            'voltage': r.expected_voltage_v,
+            'low': r.low_current_ma,
+            'high': r.high_current_ma,
+        })
+
+    selected = [True] * len(rails)  # All selected by default
+    cursor = 0
+
+    def render():
+        """Build display lines for the selector"""
+        lines = []
+        lines.append("")
+        lines.append("  RAIL SELECTION")
+        lines.append("  " + "=" * 62)
+        lines.append("  UP/DOWN: Navigate | TAB: Toggle | ENTER: Run | A: All | Q: Quit")
+        lines.append("")
+
+        for i, r in enumerate(rails):
+            marker = "[X]" if selected[i] else "[ ]"
+            arrow = ">>" if i == cursor else "  "
+            line = (
+                f"  {arrow} {marker} {r['name']:<10} ({r['tp']:<5}) "
+                f"{r['voltage']:>5.2f}V   {r['low']} -> {r['high']}mA"
+            )
+            lines.append(line)
+
+        sel_names = [rails[i]['name'] for i in range(len(rails)) if selected[i]]
+        lines.append("")
+        if sel_names:
+            lines.append(f"  Selected: {', '.join(sel_names)}  ({len(sel_names)} rails)")
+        else:
+            lines.append("  Selected: None  (use TAB to select rails)")
+        return lines
+
+    # Initial draw
+    display_lines = render()
+    for line in display_lines:
+        print(line)
+    sys.stdout.flush()
+
+    while True:
+        key = msvcrt.getch()
+
+        if key == b'\r':  # Enter - confirm selection
+            sel = [rails[i]['name'] for i in range(len(rails)) if selected[i]]
+            if not sel:
+                # Flash a message - need at least one rail
+                continue
+            print()
+            return sel
+
+        elif key == b'\t' or key == b' ':  # Tab or Space - toggle current rail
+            selected[cursor] = not selected[cursor]
+
+        elif key in (b'a', b'A'):  # Toggle all
+            if all(selected):
+                selected = [False] * len(rails)
+            else:
+                selected = [True] * len(rails)
+
+        elif key == b'\xe0' or key == b'\x00':  # Special key prefix (arrows)
+            key2 = msvcrt.getch()
+            if key2 == b'H':  # Up arrow
+                cursor = (cursor - 1) % len(rails)
+            elif key2 == b'P':  # Down arrow
+                cursor = (cursor + 1) % len(rails)
+
+        elif key in (b'q', b'Q', b'\x1b'):  # Quit or Escape
+            print("\n  Selection cancelled.")
+            return None
+
+        else:
+            continue
+
+        # Redraw: move cursor up and overwrite each line
+        display_lines = render()
+        sys.stdout.write(f"\033[{len(display_lines)}A")
+        for line in display_lines:
+            sys.stdout.write(f"\033[2K{line}\n")
+        sys.stdout.flush()
 
 
 def list_visa_resources():
@@ -105,12 +224,6 @@ Examples:
     else:
         print("\nAuto-detection will be performed during initialization...")
 
-    # Parse rails to test
-    rails_to_test = None
-    if args.rails:
-        rails_to_test = [r.strip() for r in args.rails.split(',')]
-        print(f"\nRails to test: {', '.join(rails_to_test)}")
-
     # Import the test module
     try:
         from pwrstd06_transient_response_test import PWRSTD06TransientTest
@@ -118,6 +231,23 @@ Examples:
         print(f"\nERROR: Failed to import test module: {e}")
         print("Make sure pwrstd06_transient_response_test.py is in the same directory")
         return 1
+
+    # Determine which rails to test
+    rails_to_test = None
+    if args.rails:
+        # Rails specified via command line - use directly
+        rails_to_test = [r.strip() for r in args.rails.split(',')]
+        print(f"\nRails to test: {', '.join(rails_to_test)}")
+    else:
+        # Interactive rail selection
+        rails_to_test = interactive_rail_selector(PWRSTD06TransientTest.RAIL_CONFIGS)
+        if rails_to_test is None:
+            print("Test cancelled.")
+            return 0
+        if not rails_to_test:
+            print("No rails selected. Exiting.")
+            return 0
+        print(f"\nRails to test: {', '.join(rails_to_test)}")
 
     # Create test instance (auto-detection happens here if addresses are None)
     try:
@@ -142,7 +272,7 @@ Examples:
             print("=" * 70)
             return 1
 
-        print(f"\n✓ Instruments ready:")
+        print(f"\n  Instruments ready:")
         print(f"  Oscilloscope:    {test.scope_address}")
         print(f"  Electronic Load: {test.load_address}")
 
