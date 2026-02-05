@@ -1448,18 +1448,9 @@ class PWRSTD06TransientTest:
 
         # Test each selected rail
         for i, rail in enumerate(rails_to_test, 1):
-            # ── PSU check before each rail ──
             print(f"\n{'─' * 70}")
             print(f"  [{i}/{len(rails_to_test)}]  RAIL: {rail.name} ({rail.test_point})")
             print(f"{'─' * 70}")
-            psu_ok = input("    Is the PSU powered ON? (yes/no): ").strip().lower()
-            if psu_ok not in ['yes', 'y']:
-                print("    Please turn ON the PSU and try again.")
-                psu_ok = input("    PSU is ON now? (yes/quit): ").strip().lower()
-                if psu_ok not in ['yes', 'y']:
-                    print("\n    Test sequence ended – PSU not ready.")
-                    break
-
             print(f"    Expected voltage: {rail.expected_voltage_v}V")
             print(f"    Load step: {rail.load_step_positive}")
             print()
@@ -1471,6 +1462,15 @@ class PWRSTD06TransientTest:
                 response = input(f"    Connected to {rail.name}? (yes/skip/quit): ").strip().lower()
 
                 if response in ['yes', 'y']:
+                    # ── PSU check after confirming probe connection ──
+                    psu_ok = input("    Is the PSU powered ON? (yes/no): ").strip().lower()
+                    if psu_ok not in ['yes', 'y']:
+                        print("    Please turn ON the PSU and try again.")
+                        psu_ok = input("    PSU is ON now? (yes/quit): ").strip().lower()
+                        if psu_ok not in ['yes', 'y']:
+                            response = 'quit'
+                            break
+
                     result = self.test_single_rail(rail)
                     self.results.append(result)
 
