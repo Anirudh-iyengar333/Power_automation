@@ -1,0 +1,169 @@
+{
+    "_description": "PWRSTD06 Transient Response Test Configuration",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "instrument_addresses": {
+        "_note": "Set to null for auto-detection, or provide VISA address strings",
+        "oscilloscope": null,
+        "electronic_load": null
+    },
+
+    "output_dir": {
+        "_note": "Set the full path where results should be saved. Use forward slashes. Example: D:/Results/pwrstd06",
+        "path": "D:/PWRSTD06_Results"
+    },
+
+    "rail_configs": [
+        {
+            "name": "3V6",
+            "test_point": "TP2",
+            "expected_voltage_v": 3.6,
+            "low_current_ma": 100,
+            "high_current_ma": 800,
+            "max_droop_mv": 75.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        },
+        {
+            "name": "3V3",
+            "test_point": "TP10",
+            "expected_voltage_v": 3.3,
+            "low_current_ma": 100,
+            "high_current_ma": 1500,
+            "max_droop_mv": 75.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        },
+        {
+            "name": "2V5",
+            "test_point": "TP9",
+            "expected_voltage_v": 2.5,
+            "low_current_ma": 100,
+            "high_current_ma": 750,
+            "max_droop_mv": 50.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        },
+        {
+            "name": "1V8",
+            "test_point": "TP6",
+            "expected_voltage_v": 1.8,
+            "low_current_ma": 100,
+            "high_current_ma": 1500,
+            "max_droop_mv": 50.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        },
+        {
+            "name": "1V35",
+            "test_point": "TP7",
+            "expected_voltage_v": 1.35,
+            "low_current_ma": 100,
+            "high_current_ma": 1500,
+            "max_droop_mv": 60.0,
+            "max_recovery_time_us": 100.0,
+            "max_overshoot_mv": 20.0
+        },
+        {
+            "name": "1V_PS",
+            "test_point": "TP5",
+            "expected_voltage_v": 1.0,
+            "low_current_ma": 100,
+            "high_current_ma": 1500,
+            "max_droop_mv": 60.0,
+            "max_recovery_time_us": 100.0,
+            "max_overshoot_mv": 20.0
+        },
+        {
+            "name": "1V_PL",
+            "test_point": "TP8",
+            "expected_voltage_v": 1.0,
+            "low_current_ma": 100,
+            "high_current_ma": 1500,
+            "max_droop_mv": 60.0,
+            "max_recovery_time_us": 100.0,
+            "max_overshoot_mv": 20.0
+        },
+        {
+            "name": "1V1_E0",
+            "test_point": "TP13",
+            "expected_voltage_v": 1.1,
+            "low_current_ma": 100,
+            "high_current_ma": 500,
+            "max_droop_mv": 50.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 20.0
+        },
+        {
+            "name": "2V5_E0",
+            "test_point": "TP14",
+            "expected_voltage_v": 2.5,
+            "low_current_ma": 100,
+            "high_current_ma": 500,
+            "max_droop_mv": 50.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        },
+        {
+            "name": "1V8_E0",
+            "test_point": "TP15",
+            "expected_voltage_v": 1.8,
+            "low_current_ma": 100,
+            "high_current_ma": 500,
+            "max_droop_mv": 50.0,
+            "max_recovery_time_us": 150.0,
+            "max_overshoot_mv": 30.0
+        }
+    ],
+
+    "scope_config": {
+        "_note": "Per-rail oscilloscope settings. trigger_up = FALLING edge (load up), trigger_down = RISING edge (load down)",
+        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30,  "bandwidth_mhz": 20},
+        "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30,  "bandwidth_mhz": 20},
+        "2V5":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
+        "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81,  "bandwidth_mhz": 20},
+        "1V35":   {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
+        "1V_PS":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.936, "trigger_down": 1.024, "bandwidth_mhz": 20},
+        "1V_PL":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
+        "1V1_E0": {"v_scale": 0.010, "timebase": 50e-6,  "trigger_up": 1.075, "trigger_down": 1.112, "bandwidth_mhz": 20},
+        "2V5_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.445, "trigger_down": 2.512, "bandwidth_mhz": 20},
+        "1V8_E0": {"v_scale": 0.050, "timebase": 20e-6,  "trigger_up": 1.763, "trigger_down": 1.807, "bandwidth_mhz": 20}
+    },
+
+    "scope_settings": {
+        "channel": 1,
+        "coupling": "DC",
+        "probe_attenuation": 1.0,
+        "bandwidth_limit": true,
+        "trigger_sweep_mode": "NORMal"
+    },
+
+    "timing": {
+        "_note": "All times in seconds unless noted otherwise",
+        "stabilize_after_current_set_s": 0.5,
+        "stabilize_before_arm_s": 0.5,
+        "delay_after_arm_s": 0.3,
+        "delay_between_steps_s": 1.0,
+        "trigger_timeout_s": 5.0,
+        "trigger_poll_interval_s": 0.2,
+        "delay_after_stop_s": 0.2
+    },
+
+    "electronic_load": {
+        "current_range_margin": 1.5,
+        "slew_rate_rise_time_us": 0.1,
+        "ovp_margin_v": 1.0,
+        "uvp_margin_v": 1.0,
+        "uvp_minimum_v": 0.1
+    },
+
+    "analysis": {
+        "_note": "Parameters controlling waveform analysis algorithms",
+        "recovery_tolerance_percent": 0.02,
+        "recovery_tolerance_min_mv": 10.0,
+        "recovery_settled_check_samples": 50,
+        "ringing_rms_threshold": 0.4,
+        "edge_detection_window_percent": 0.4,
+        "waveform_noise_warning_threshold_v": 0.01
+    }
+}

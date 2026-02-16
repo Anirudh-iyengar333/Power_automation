@@ -58,6 +58,7 @@ from dataclasses import dataclass, asdict, field           # Tools for organizin
 from enum import Enum              # Tool for creating lists of fixed choices (like PASS/FAIL)
 import sys             # System tools for the program
 import os              # Operating system tools for file management
+import shutil          # For removing directories if user discards results
 
 # Add parent directory to path for instrument imports
 # ↓ This line tells Python where to find the instrument control code
@@ -78,6 +79,59 @@ except ImportError as e:  # If something went wrong loading drivers
     print(f"Import error: {e}")  # Show what went wrong
     print("Ensure instrument_control module is available in parent directory")  # Give helpful advice
     sys.exit(1)  # Exit if drivers cannot be loaded
+
+
+# ── Configuration loader ─────────────────────────────────────────────────
+# Reads pwrstd06_config.json (same folder as this script) so you can
+# change rails, trigger levels, timing, etc. without editing Python code.
+
+_CONFIG_PATH = Path(__file__).parent / "pwrstd06_config.json"
+
+def _load_config(path: Path = _CONFIG_PATH) -> dict:
+    """Load configuration from JSON file. Returns empty dict on failure."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        print(f"Loaded config from {path.name}")
+        return cfg
+    except FileNotFoundError:
+        print(f"WARNING: Config file not found ({path}). Using built-in defaults.")
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Config file has invalid JSON: {e}")
+        print("       Fix pwrstd06_config.json or delete it to use defaults.")
+        sys.exit(1)
+
+_CFG = _load_config()
+
+
+def _build_rail_configs(cfg: dict) -> list:
+    """Build RailConfig list from config dict, with hardcoded fallback."""
+    raw = cfg.get("rail_configs")
+    if not raw:
+        return None  # caller will use hardcoded defaults
+    configs = []
+    for r in raw:
+        configs.append(RailConfig(
+            name=r["name"],
+            test_point=r["test_point"],
+            expected_voltage_v=r["expected_voltage_v"],
+            low_current_ma=r["low_current_ma"],
+            high_current_ma=r["high_current_ma"],
+            max_droop_mv=r["max_droop_mv"],
+            max_recovery_time_us=r["max_recovery_time_us"],
+            max_overshoot_mv=r["max_overshoot_mv"],
+        ))
+    return configs
+
+
+def _build_scope_config(cfg: dict) -> dict:
+    """Build scope config dict from config, with hardcoded fallback."""
+    raw = cfg.get("scope_config")
+    if not raw:
+        return None
+    # Strip out keys starting with _ (comments)
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 
 # Define the possible test results (like a multiple choice list)
@@ -303,78 +357,66 @@ class PWRSTD06TransientTest:
     - Generates a comprehensive summary report at the end
     """
 
-    # List of all 10 power rails to test with their specifications
-    # Format: RailConfig(name, test_point, voltage, low_current, high_current, max_droop, max_recovery, max_overshoot)
-    # UPDATED SPECS per test requirements:
-    # - 3V6/3V3: <50-75mV droop, <150µs recovery, <30mV overshoot
-    # - 2V5/1V8: <50mV droop, <150µs recovery, <30mV overshoot
-    # - Core Rails (1V35/PS/PL): <50-60mV droop, <100µs recovery, <20mV overshoot
-    RAIL_CONFIGS = [
-        # Rail name, Test Point, Voltage(V), Low(mA), High(mA), Droop(mV), Recovery(μs), Overshoot(mV)
-        RailConfig("3V6",     "TP2",  3.6,  100, 800,  75.0, 150.0, 30.0),   # 3V6: <75mV droop, <150µs, <30mV
-        RailConfig("3V3",     "TP10", 3.3,  100, 1500, 75.0, 150.0, 30.0),   # 3V3: <75mV droop, <150µs, <30mV
-        RailConfig("2V5",     "TP9",  2.5,  100, 750,  50.0, 150.0, 30.0),   # 2V5: <50mV droop, <150µs, <30mV
-        RailConfig("1V8",     "TP6",  1.8,  100, 1500, 50.0, 150.0, 30.0),   # 1V8: <50mV droop, <150µs, <30mV
-        RailConfig("1V35",    "TP7",  1.35, 100, 1500, 60.0, 100.0, 20.0),   # Core 1V35: <60mV droop, <100µs, <20mV
-        RailConfig("1V_PS",   "TP5",  1.0,  100, 1500, 60.0, 100.0, 20.0),   # Core PS: <60mV droop, <100µs, <20mV
-        RailConfig("1V_PL",   "TP8",  1.0,  100, 1500, 60.0, 100.0, 20.0),   # Core PL: <60mV droop, <100µs, <20mV
-        RailConfig("1V1_E0",  "TP13", 1.1,  100, 500,  50.0, 150.0, 20.0),   # 1V1_E0: <50mV droop, <150µs, <20mV
-        RailConfig("2V5_E0",  "TP14", 2.5,  100, 500,  50.0, 150.0, 30.0),   # 2V5_E0: <50mV droop, <150µs, <30mV
-        RailConfig("1V8_E0",  "TP15", 1.8,  100, 500,  50.0, 150.0, 30.0),   # 1V8_E0: <50mV droop, <150µs, <30mV
+    # Rail and scope configs are loaded from pwrstd06_config.json.
+    # Edit that file to change rails, trigger levels, limits, etc.
+    # Hardcoded defaults below are used only if the config file is missing.
+    RAIL_CONFIGS = _build_rail_configs(_CFG) or [
+        RailConfig("3V6",     "TP2",  3.6,  100, 800,  75.0, 150.0, 30.0),
+        RailConfig("3V3",     "TP10", 3.3,  100, 1500, 75.0, 150.0, 30.0),
+        RailConfig("2V5",     "TP9",  2.5,  100, 750,  50.0, 150.0, 30.0),
+        RailConfig("1V8",     "TP6",  1.8,  100, 1500, 50.0, 150.0, 30.0),
+        RailConfig("1V35",    "TP7",  1.35, 100, 1500, 60.0, 100.0, 20.0),
+        RailConfig("1V_PS",   "TP5",  1.0,  100, 1500, 60.0, 100.0, 20.0),
+        RailConfig("1V_PL",   "TP8",  1.0,  100, 1500, 60.0, 100.0, 20.0),
+        RailConfig("1V1_E0",  "TP13", 1.1,  100, 500,  50.0, 150.0, 20.0),
+        RailConfig("2V5_E0",  "TP14", 2.5,  100, 500,  50.0, 150.0, 30.0),
+        RailConfig("1V8_E0",  "TP15", 1.8,  100, 500,  50.0, 150.0, 30.0),
     ]
 
-    # ╔════════════════════════════════════════════════════════════════════════════╗
-    # ║  SCOPE & TRIGGER CONFIGURATION PER RAIL  ──  FILL IN THIS TABLE          ║
-    # ╠════════════════════════════════════════════════════════════════════════════╣
-    # ║                                                                          ║
-    # ║  v_scale:      Vertical scale in V/div                                   ║
-    # ║  timebase:     Timebase in s/div                                         ║
-    # ║  trigger_up:   Trigger level (V) for LOAD UP  (FALLING edge / droop)     ║
-    # ║  trigger_down: Trigger level (V) for LOAD DOWN (RISING edge / rise)      ║
-    # ║                                                                          ║
-    # ║  Offset = rail nominal voltage (set automatically).                      ║
-    # ║  Coupling: DC   |   Probe: 10:1                                         ║
-    # ║                                                                          ║
-    # ║  HOW TO SET TRIGGER LEVELS:                                              ║
-    # ║    trigger_up  = slightly BELOW nominal (catches the voltage drop)       ║
-    # ║    trigger_down = slightly ABOVE nominal (catches the voltage rise)      ║
-    # ║                                                                          ║
-    # ║  From your manual testing:                                               ║
-    # ║    3V3: trigger_up=3.225  trigger_down=3.30                              ║
-    # ║    2V5: trigger_up=2.447  trigger_down=2.495                             ║
-    # ║    1V8: trigger_up=1.735  trigger_down=1.81                              ║
-    # ║                                                                          ║
-    # ║  >>> FILL IN trigger_up and trigger_down for every rail you test <<<     ║
-    # ║                                                                          ║
-    # ╚════════════════════════════════════════════════════════════════════════════╝
-    SCOPE_CONFIG = {
-        #                  v_scale    timebase    trigger_up       trigger_down    bandwidth
-        #                  (V/div)    (s/div)     (V) FALLING      (V) RISING      (MHz)
-        # ─── TRIGGER VALUES FROM TEST MEASUREMENTS ───────────────────────────────
+    SCOPE_CONFIG = _build_scope_config(_CFG) or {
         "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
         "2V5":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
         "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81,  "bandwidth_mhz": 20},
-        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},  # Similar to 3V3
+        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
         "1V35":   {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
         "1V_PS":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.936, "trigger_down": 1.024, "bandwidth_mhz": 20},
         "1V_PL":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
         "1V1_E0": {"v_scale": 0.010, "timebase": 50e-6,  "trigger_up": 1.075, "trigger_down": 1.112, "bandwidth_mhz": 20},
         "2V5_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.445, "trigger_down": 2.512, "bandwidth_mhz": 20},
-        "1V8_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81, "bandwidth_mhz": 20},  # Similar to 1V8
+        "1V8_E0": {"v_scale": 0.050, "timebase": 20e-6,  "trigger_up": 1.763, "trigger_down": 1.807, "bandwidth_mhz": 20},
     }
 
     def __init__(self,
                  oscilloscope_address: Optional[str] = None,
                  electronic_load_address: Optional[str] = None,
-                 output_dir: str = "pwrstd06_results"):
+                 output_dir: str = None):
         """
         Initialize PWRSTD06 transient response test - this sets up everything when the test starts
 
         Args (what you can provide):
             oscilloscope_address: Where to find the oscilloscope (auto-find if not provided)
             electronic_load_address: Where to find the electronic load (auto-find if not provided)
-            output_dir: Folder name where to save results (default: "pwrstd06_results")
+            output_dir: Folder name where to save results (default from config or "pwrstd06_results")
         """
+        # Apply config-file defaults for arguments not passed by the caller
+        instr_cfg = _CFG.get("instrument_addresses", {})
+        if oscilloscope_address is None:
+            oscilloscope_address = instr_cfg.get("oscilloscope")
+        if electronic_load_address is None:
+            electronic_load_address = instr_cfg.get("electronic_load")
+        if output_dir is None:
+            out_cfg = _CFG.get("output_dir", {})
+            if isinstance(out_cfg, dict):
+                output_dir = out_cfg.get("path", "pwrstd06_results")
+            else:
+                output_dir = out_cfg or "pwrstd06_results"
+
+        # Load timing and other settings from config
+        self._timing = _CFG.get("timing", {})
+        self._eload_cfg = _CFG.get("electronic_load", {})
+        self._scope_settings = _CFG.get("scope_settings", {})
+        self._analysis_cfg = _CFG.get("analysis", {})
+
         # Auto-detect instruments if addresses weren't provided
         if oscilloscope_address is None or electronic_load_address is None:
             print("\nAuto-detecting instruments...")  # Tell user we're searching
@@ -506,16 +548,19 @@ class PWRSTD06TransientTest:
             self._logger.info(f"  Nominal voltage: {rail.expected_voltage_v}V")
             self._logger.info(f"  Settings: {v_scale*1000:.0f}mV/div, {timebase*1e6:.0f}us/div")
 
-            # ── CHANNEL 1: Rail Voltage, DC coupled ──
+            # ── CHANNEL: Rail Voltage, DC coupled ──
             # Offset = rail nominal voltage (centers trace on screen)
+            ch = self._scope_settings.get("channel", 1)
+            coupling = self._scope_settings.get("coupling", "DC")
+            probe_atten = self._scope_settings.get("probe_attenuation", 1.0)
             self._scope.configure_channel(
-                channel=1,
+                channel=ch,
                 vertical_scale=v_scale,
                 vertical_offset=rail.expected_voltage_v,
-                coupling="DC",
-                probe_attenuation=10.0  # 10:1 probe
+                coupling=coupling,
+                probe_attenuation=probe_atten
             )
-            self._logger.info(f"  Ch1: {v_scale*1000:.0f}mV/div, offset={rail.expected_voltage_v}V, DC, 10:1")
+            self._logger.info(f"  Ch{ch}: {v_scale*1000:.0f}mV/div, offset={rail.expected_voltage_v}V, {coupling}, {probe_atten}")
 
             # ── TIMEBASE ──
             self._scope.configure_timebase(
@@ -526,23 +571,23 @@ class PWRSTD06TransientTest:
 
             # ── INITIAL TRIGGER: falling edge for droop capture ──
             # Reconfigured per step direction in perform_load_step()
+            sweep_mode = self._scope_settings.get("trigger_sweep_mode", "NORMal")
             trigger_up = cfg.get("trigger_up", rail.expected_voltage_v)
             self._scope.configure_trigger(
-                channel=1,
+                channel=ch,
                 trigger_level=trigger_up,
                 trigger_slope="NEG",
-                sweep_mode="NORMal"
+                sweep_mode=sweep_mode
             )
-            self._logger.info(f"  Trigger: FALLING edge at {trigger_up:.3f}V (NORMAL sweep)")
+            self._logger.info(f"  Trigger: FALLING edge at {trigger_up:.3f}V ({sweep_mode} sweep)")
 
             # ── BANDWIDTH LIMIT  (20 MHz on DSOX6004A) ──
-            # SCPI: :CHANnel<n>:BWLimit {ON|OFF}
-            #   ON  = 20 MHz low-pass filter (reduces noise for transient capture)
-            #   OFF = full bandwidth
+            bw_limit = self._scope_settings.get("bandwidth_limit", True)
+            bw_state = "ON" if bw_limit else "OFF"
             try:
-                self._scope._scpi_wrapper.write(":CHANnel1:BWLimit ON")
+                self._scope._scpi_wrapper.write(f":CHANnel{ch}:BWLimit {bw_state}")
                 time.sleep(0.05)
-                self._logger.info("  Bandwidth limit: 20 MHz (CHANnel1:BWLimit ON)")
+                self._logger.info(f"  Bandwidth limit: {bw_state} (CHANnel{ch}:BWLimit {bw_state})")
             except Exception as e:
                 self._logger.warning(f"  Could not set bandwidth limit: {e}")
 
@@ -606,9 +651,10 @@ class PWRSTD06TransientTest:
             # STEP 1: Get scope's built-in measurements
             # ============================================================
             calc_log.append("\n[STEP 1] READING SCOPE BUILT-IN MEASUREMENTS")
+            ch = self._scope_settings.get("channel", 1)
 
             # Get VMAX (maximum voltage in waveform)
-            v_max = self._scope.measure_max(1)
+            v_max = self._scope.measure_max(ch)
             if v_max is not None:
                 results['max_v'] = v_max
                 calc_log.append(f"  VMAX (scope): {v_max:.4f}V ({v_max*1000:.1f}mV)")
@@ -616,7 +662,7 @@ class PWRSTD06TransientTest:
                 calc_log.append("  VMAX: Failed to read")
 
             # Get VMIN (minimum voltage in waveform)
-            v_min = self._scope.measure_min(1)
+            v_min = self._scope.measure_min(ch)
             if v_min is not None:
                 results['min_v'] = v_min
                 calc_log.append(f"  VMIN (scope): {v_min:.4f}V ({v_min*1000:.1f}mV)")
@@ -625,14 +671,14 @@ class PWRSTD06TransientTest:
 
             # Get DC RMS FS (DC baseline voltage - the true settled baseline for DC-coupled measurements)
             # This is the scope's measurement of the DC level on the channel
-            dc_rms_fs = self._scope.measure_dc_rms_fs(1)
+            dc_rms_fs = self._scope.measure_dc_rms_fs(ch)
             if dc_rms_fs is not None:
                 results['baseline_v'] = dc_rms_fs
                 calc_log.append(f"  DC RMS FS (baseline): {dc_rms_fs:.4f}V ({dc_rms_fs*1000:.1f}mV)")
             else:
                 calc_log.append(f"  DC RMS FS: Failed to read, falling back to VTOP")
                 # Fallback to VTOP if DC RMS FS is not available
-                v_top = self._scope.measure_top(1)
+                v_top = self._scope.measure_top(ch)
                 if v_top is not None:
                     results['baseline_v'] = v_top
                     calc_log.append(f"  VTOP (baseline fallback): {v_top:.4f}V ({v_top*1000:.1f}mV)")
@@ -641,7 +687,7 @@ class PWRSTD06TransientTest:
                     calc_log.append(f"  Using expected voltage: {rail.expected_voltage_v}V")
 
             # Get VBASE (base/low level) for reference
-            v_base = self._scope.measure_base(1)
+            v_base = self._scope.measure_base(ch)
             if v_base is not None:
                 calc_log.append(f"  VBASe (low level): {v_base:.4f}V ({v_base*1000:.1f}mV)")
 
@@ -652,7 +698,7 @@ class PWRSTD06TransientTest:
             calc_log.append(f"  ★ Using DC RMS FS as baseline: {dc_baseline:.4f}V ({dc_baseline*1000:.1f}mV)")
 
             # Get scope's built-in overshoot measurement
-            scope_overshoot = self._scope.measure_overshoot(1)
+            scope_overshoot = self._scope.measure_overshoot(ch)
             if scope_overshoot is not None:
                 calc_log.append(f"  OVERshoot (scope %): {scope_overshoot:.2f}%")
 
@@ -717,7 +763,9 @@ class PWRSTD06TransientTest:
                 
                 # Define settlement tolerance (±2-5% of voltage change or minimum 10mV)
                 voltage_change = abs(target_voltage - dc_baseline)
-                tolerance = max(voltage_change * 0.02, 0.010)  # 2% of change or 10mV minimum
+                tol_pct = self._analysis_cfg.get("recovery_tolerance_percent", 0.02)
+                tol_min_mv = self._analysis_cfg.get("recovery_tolerance_min_mv", 10.0)
+                tolerance = max(voltage_change * tol_pct, tol_min_mv / 1000.0)
                 lower_bound = target_voltage - tolerance
                 upper_bound = target_voltage + tolerance
                 
@@ -795,18 +843,23 @@ class PWRSTD06TransientTest:
             self._load.set_function("CURRent")
 
             # Set current range
-            max_current_a = rail.high_current_ma / 1000.0 * 1.5  # 50% margin
+            range_margin = self._eload_cfg.get("current_range_margin", 1.5)
+            max_current_a = rail.high_current_ma / 1000.0 * range_margin
             self._load.set_current_range(max_current_a)
 
             # Configure fast slew rate (A/us for 100ns steps)
             current_step_a = (rail.high_current_ma - rail.low_current_ma) / 1000.0
-            slew_rate = current_step_a / 0.1  # A/us for 100ns rise time
+            rise_time_us = self._eload_cfg.get("slew_rate_rise_time_us", 0.1)
+            slew_rate = current_step_a / rise_time_us
             self._load.set_current_slew_rate(slew_rate)
             self._load.set_current_slow_rate_mode(False)  # Fast mode (A/us)
 
             # Set voltage protection
-            ovp = rail.expected_voltage_v + 1.0
-            uvp = max(0.1, rail.expected_voltage_v - 1.0)
+            ovp_margin = self._eload_cfg.get("ovp_margin_v", 1.0)
+            uvp_margin = self._eload_cfg.get("uvp_margin_v", 1.0)
+            uvp_min = self._eload_cfg.get("uvp_minimum_v", 0.1)
+            ovp = rail.expected_voltage_v + ovp_margin
+            uvp = max(uvp_min, rail.expected_voltage_v - uvp_margin)
             self._load.set_current_bounds(high=ovp, low=uvp)
 
             self._logger.info(f"Electronic load configured: {rail.low_current_ma}mA - {rail.high_current_ma}mA")
@@ -850,7 +903,7 @@ class PWRSTD06TransientTest:
             # *** STEP 1: SET UP THE STARTING CURRENT ***
             self._load.set_current_level(initial_ma / 1000.0)
             self._load.enable_input()
-            time.sleep(0.5)  # Let current stabilize
+            time.sleep(self._timing.get("stabilize_after_current_set_s", 0.5))
 
             # *** STEP 2: SET UP TRIGGER FROM SCOPE_CONFIG ***
             # Load UP  -> voltage drops -> FALLING edge at trigger_up
@@ -864,30 +917,33 @@ class PWRSTD06TransientTest:
                 trigger_level_v = cfg.get("trigger_down", rail.expected_voltage_v)
                 trigger_slope = "POS"
 
+            ch = self._scope_settings.get("channel", 1)
+            sweep_mode = self._scope_settings.get("trigger_sweep_mode", "NORMal")
             self._scope.configure_trigger(
-                channel=1,
+                channel=ch,
                 trigger_level=trigger_level_v,
                 trigger_slope=trigger_slope,
-                sweep_mode="NORMal"
+                sweep_mode=sweep_mode
             )
-            self._logger.info(f"  Trigger: {trigger_slope} edge at {trigger_level_v:.3f}V, NORMAL sweep")
+            self._logger.info(f"  Trigger: {trigger_slope} edge at {trigger_level_v:.3f}V, {sweep_mode} sweep")
 
             # *** STEP 3: STABILIZE + ARM ***
-            time.sleep(0.5)
+            time.sleep(self._timing.get("stabilize_before_arm_s", 0.5))
             self._scope.single()
-            time.sleep(0.3)
+            time.sleep(self._timing.get("delay_after_arm_s", 0.3))
 
             # *** STEP 4: EXECUTE THE LOAD STEP ***
             self._load.set_current_level(final_ma / 1000.0)
             self._logger.info(f"  Load step: {initial_ma}mA -> {final_ma}mA")
 
             # *** STEP 5: WAIT FOR SCOPE TO TRIGGER ***
-            max_wait = 5.0
+            max_wait = self._timing.get("trigger_timeout_s", 5.0)
+            poll_interval = self._timing.get("trigger_poll_interval_s", 0.2)
             elapsed = 0.0
             triggered = False
             while elapsed < max_wait:
-                time.sleep(0.2)
-                elapsed += 0.2
+                time.sleep(poll_interval)
+                elapsed += poll_interval
                 try:
                     state = self._scope._scpi_wrapper.query(":RSTate?").strip()
                     if state == "STOP":
@@ -908,7 +964,7 @@ class PWRSTD06TransientTest:
             # *** STEP 6: STOP SCOPE + SCREENSHOT ***
             try:
                 self._scope._scpi_wrapper.write(":STOP")
-                time.sleep(0.2)
+                time.sleep(self._timing.get("delay_after_stop_s", 0.2))
             except:
                 pass
 
@@ -933,9 +989,9 @@ class PWRSTD06TransientTest:
             calc_lines.append(f"Triggered: {'Yes' if triggered else 'No (forced)'}")
             calc_lines.append("=" * 60)
 
-            dc_rms = self._scope.measure_dc_rms_fs(1)
-            v_min = self._scope.measure_min(1)
-            v_max = self._scope.measure_max(1)
+            dc_rms = self._scope.measure_dc_rms_fs(ch)
+            v_min = self._scope.measure_min(ch)
+            v_max = self._scope.measure_max(ch)
 
             calc_lines.append(f"\nScope measurements:")
             calc_lines.append(f"  DC RMS FS: {dc_rms:.4f}V" if dc_rms is not None else "  DC RMS FS: FAILED")
@@ -1104,11 +1160,11 @@ class PWRSTD06TransientTest:
                 return (droop_mv, recovery_us, overshoot_mv, has_ringing, "\n".join(calc_log))
 
             # *** STEP 1: GET THE VOLTAGE DATA FROM OSCILLOSCOPE ***
-            # Ch1 is the rail voltage (DC-coupled) - measuring actual voltage level
+            ch = self._scope_settings.get("channel", 1)
             calc_log.append("\n[STEP 1] DOWNLOADING WAVEFORM DATA FROM OSCILLOSCOPE")
-            calc_log.append(f"  Reading Ch1 (Rail Voltage, DC-coupled)")
+            calc_log.append(f"  Reading Ch{ch} (Rail Voltage, DC-coupled)")
             calc_log.append(f"  Expected nominal voltage: {rail.expected_voltage_v}V")
-            waveform = self._scope.get_channel_data(1)  # Download voltage vs time data from Channel 1
+            waveform = self._scope.get_channel_data(ch)  # Download voltage vs time data
             if waveform is None:  # If download failed
                 self._logger.error("CRITICAL: Could not get waveform data - TEST FAILED")
                 calc_log.append("!!! CRITICAL ERROR: Could not download waveform data from oscilloscope !!!")
@@ -1150,7 +1206,8 @@ class PWRSTD06TransientTest:
             calc_log.append(f"  Middle section std: {mid_std*1000:.3f}mV")
 
             # Warning if the waveform looks like continuous oscillation
-            if first_std > 0.01 and last_std > 0.01:  # Both ends have >10mV noise
+            noise_threshold = self._analysis_cfg.get("waveform_noise_warning_threshold_v", 0.01)
+            if first_std > noise_threshold and last_std > noise_threshold:  # Both ends have high noise
                 high_noise_ratio = min(first_std, last_std) / max(first_std, last_std)
                 if high_noise_ratio > 0.5:  # Similar noise in both settled regions
                     calc_log.append(f"\n  ⚠ WARNING: High noise detected in both pre and post regions!")
@@ -1178,9 +1235,10 @@ class PWRSTD06TransientTest:
 
             # Use the detected edge as trigger point, but validate it's reasonable
             mid_point = len(voltage_data) // 2
-            # If detected edge is within reasonable range of middle (±40%), use it
+            edge_window = self._analysis_cfg.get("edge_detection_window_percent", 0.4)
+            # If detected edge is within reasonable range of middle, use it
             # Otherwise fall back to middle (trigger point)
-            if abs(edge_idx - mid_point) < mid_point * 0.4:
+            if abs(edge_idx - mid_point) < mid_point * edge_window:
                 trigger_idx = edge_idx
                 calc_log.append(f"✓ Detected edge at index: {trigger_idx}")
             else:
@@ -1244,12 +1302,13 @@ class PWRSTD06TransientTest:
             recovery_idx = len(post_trigger) - 1  # Start assuming it takes the full time
             settled = False
 
+            settled_samples = self._analysis_cfg.get("recovery_settled_check_samples", 50)
             for i in range(len(post_trigger)):  # Check each point in time
                 if abs(post_trigger[i] - baseline) <= tolerance:  # If voltage is within tolerance of baseline
                     # Check if it STAYS within tolerance (not just a momentary cross)
-                    if i + 50 < len(post_trigger):  # If there's enough data to check ahead
-                        remaining = post_trigger[i:i+50]  # Get next 50 points
-                        # Check if ALL next 50 points stay within tolerance of baseline
+                    if i + settled_samples < len(post_trigger):  # If there's enough data to check ahead
+                        remaining = post_trigger[i:i+settled_samples]  # Get next N points
+                        # Check if ALL next N points stay within tolerance of baseline
                         if np.all(np.abs(remaining - baseline) <= tolerance):
                             recovery_idx = i  # This is when it truly settled
                             settled = True
@@ -1284,15 +1343,16 @@ class PWRSTD06TransientTest:
                 settled_mean = np.mean(settled_region)
                 rms_ratio = (rms / peak) if peak > 0 else 0  # Ratio of RMS to peak
                 # If RMS is high relative to peak, there's sustained oscillation (ringing)
-                has_ringing = rms > 0.4 * peak if peak > 0 else False
+                ringing_thresh = self._analysis_cfg.get("ringing_rms_threshold", 0.4)
+                has_ringing = rms > ringing_thresh * peak if peak > 0 else False
 
                 calc_log.append(f"\n  RINGING DETECTION CALCULATION:")
                 calc_log.append(f"    Settled region mean: {settled_mean*1000:.3f}mV")
                 calc_log.append(f"    RMS (standard deviation): {rms*1000:.3f}mV")
                 calc_log.append(f"    Peak deviation from mean: {peak*1000:.3f}mV")
                 calc_log.append(f"    RMS/Peak ratio: {rms_ratio:.3f}")
-                calc_log.append(f"    Ringing threshold: RMS > 0.4 × Peak")
-                calc_log.append(f"    Calculation: {rms*1000:.3f}mV > {0.4*peak*1000:.3f}mV? {has_ringing}")
+                calc_log.append(f"    Ringing threshold: RMS > {ringing_thresh} x Peak")
+                calc_log.append(f"    Calculation: {rms*1000:.3f}mV > {ringing_thresh*peak*1000:.3f}mV? {has_ringing}")
                 calc_log.append(f"    ★ RINGING = {'YES ✗ FAIL' if has_ringing else 'NO ✓ PASS'}")
             else:
                 has_ringing = False
@@ -1378,7 +1438,7 @@ class PWRSTD06TransientTest:
         result.positive_step = self.perform_load_step(rail, LoadStepDirection.POSITIVE)
 
         # Small delay between steps
-        time.sleep(1.0)
+        time.sleep(self._timing.get("delay_between_steps_s", 1.0))
 
         # Perform negative load step
         self._logger.info("--- NEGATIVE LOAD STEP ---")
@@ -1504,11 +1564,29 @@ class PWRSTD06TransientTest:
         # Disconnect instruments
         self.disconnect_instruments()
 
-        # Generate reports
-        self._generate_reports()
-
-        # Print summary
+        # Print summary to console (always shown so user can review before deciding)
         self._print_summary()
+
+        # Ask user whether to save results
+        print(f"\n{'─' * 70}")
+        print(f"  Results would be saved to: {self.output_dir}")
+        print(f"{'─' * 70}")
+        while True:
+            save_choice = input("  Save results? (yes/no): ").strip().lower()
+            if save_choice in ('yes', 'y'):
+                self._generate_reports()
+                print(f"\n  Results saved to: {self.output_dir}")
+                break
+            elif save_choice in ('no', 'n'):
+                # Remove the entire run directory and everything in it
+                try:
+                    shutil.rmtree(self.output_dir)
+                    print("\n  Results discarded. Output folder removed.")
+                except Exception as e:
+                    print(f"\n  Could not remove output folder: {e}")
+                break
+            else:
+                print("  Please enter 'yes' or 'no'")
 
         return True
 
@@ -1773,11 +1851,10 @@ def main():
     else:
         print("Auto-detecting instruments (pass addresses as arguments to override)...")
 
-    # Create and run test (auto-detection will happen if addresses are None)
+    # Create and run test (addresses and output_dir come from pwrstd06_config.json)
     test = PWRSTD06TransientTest(
         oscilloscope_address=scope_addr,
         electronic_load_address=load_addr,
-        output_dir=r""  # <-- Enter your desired save path here, e.g. r"D:\Results\pwrstd06"
     )
 
     # Check if instruments were found
