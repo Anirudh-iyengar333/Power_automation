@@ -82,55 +82,72 @@ except ImportError as e:  # If something went wrong loading drivers
 
 
 # ── Configuration loader ─────────────────────────────────────────────────
-# Reads pwrstd06_config.json (same folder as this script) so you can
-# change rails, trigger levels, timing, etc. without editing Python code.
+# ALL test settings live in pwrstd06_config.json (same folder as this script).
+# That file is REQUIRED.  There are NO hardcoded fallback values in this code.
+# To change rails, trigger levels, timing, etc., edit the JSON — not this file.
 
-_CONFIG_PATH = Path(__file__).parent / "pwrstd06_config.json"
+_CONFIG_PATH = Path(__file__).parent / "pwrstd06_config.json"  # Path to the JSON config file, sitting next to this script
 
 def _load_config(path: Path = _CONFIG_PATH) -> dict:
-    """Load configuration from JSON file. Returns empty dict on failure."""
+    """
+    Load the JSON config file.  Exits the program if the file is missing or
+    contains invalid JSON — the config is mandatory, not optional.
+    """
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        print(f"Loaded config from {path.name}")
-        return cfg
+        with open(path, "r", encoding="utf-8") as f:  # Open the config file for reading
+            cfg = json.load(f)                         # Parse the JSON text into a Python dictionary
+        print(f"Loaded config from {path.name}")       # Confirm which config was loaded
+        return cfg                                     # Return the parsed config dictionary
     except FileNotFoundError:
-        print(f"WARNING: Config file not found ({path}). Using built-in defaults.")
-        return {}
+        # Config file is required — tell the user and stop
+        print(f"ERROR: Config file not found: {path}")
+        print("       This file is required. Copy pwrstd06_config.json into the PWR_STD_06 folder.")
+        sys.exit(1)
     except json.JSONDecodeError as e:
+        # Config file exists but has a syntax error in the JSON
         print(f"ERROR: Config file has invalid JSON: {e}")
-        print("       Fix pwrstd06_config.json or delete it to use defaults.")
+        print("       Fix pwrstd06_config.json before running the test.")
         sys.exit(1)
 
-_CFG = _load_config()
+_CFG = _load_config()  # Load the config once at import time; every function below uses _CFG
 
 
 def _build_rail_configs(cfg: dict) -> list:
-    """Build RailConfig list from config dict, with hardcoded fallback."""
-    raw = cfg.get("rail_configs")
+    """
+    Build a list of RailConfig objects from the JSON config.
+    Each entry in "rail_configs" becomes one RailConfig with all its limits.
+    """
+    raw = cfg.get("rail_configs")  # Get the "rail_configs" array from the JSON
     if not raw:
-        return None  # caller will use hardcoded defaults
+        # Config file must have a "rail_configs" section — abort if missing
+        print("ERROR: 'rail_configs' section missing from pwrstd06_config.json")
+        sys.exit(1)
     configs = []
-    for r in raw:
+    for r in raw:  # Loop through each rail definition in the JSON array
         configs.append(RailConfig(
-            name=r["name"],
-            test_point=r["test_point"],
-            expected_voltage_v=r["expected_voltage_v"],
-            low_current_ma=r["low_current_ma"],
-            high_current_ma=r["high_current_ma"],
-            max_droop_mv=r["max_droop_mv"],
-            max_recovery_time_us=r["max_recovery_time_us"],
-            max_overshoot_mv=r["max_overshoot_mv"],
+            name=r["name"],                            # Rail name, e.g. "3V3"
+            test_point=r["test_point"],                # Board test point, e.g. "TP10"
+            expected_voltage_v=r["expected_voltage_v"], # Nominal voltage in volts
+            low_current_ma=r["low_current_ma"],        # Low load current (mA), usually 100
+            high_current_ma=r["high_current_ma"],      # High load current (mA), the step target
+            max_droop_mv=r["max_droop_mv"],            # Max allowed voltage drop (mV)
+            max_recovery_time_us=r["max_recovery_time_us"],  # Max allowed recovery time (us)
+            max_overshoot_mv=r["max_overshoot_mv"],    # Max allowed overshoot (mV)
         ))
     return configs
 
 
 def _build_scope_config(cfg: dict) -> dict:
-    """Build scope config dict from config, with hardcoded fallback."""
-    raw = cfg.get("scope_config")
+    """
+    Build the per-rail oscilloscope settings dict from the JSON config.
+    Keys starting with '_' (like "_note") are comments and get stripped out.
+    """
+    raw = cfg.get("scope_config")  # Get the "scope_config" section from the JSON
     if not raw:
-        return None
-    # Strip out keys starting with _ (comments)
+        # Config file must have a "scope_config" section — abort if missing
+        print("ERROR: 'scope_config' section missing from pwrstd06_config.json")
+        sys.exit(1)
+    # Return only real entries, stripping out comment keys like "_note"
     return {k: v for k, v in raw.items() if not k.startswith("_")}
 
 
@@ -357,34 +374,11 @@ class PWRSTD06TransientTest:
     - Generates a comprehensive summary report at the end
     """
 
-    # Rail and scope configs are loaded from pwrstd06_config.json.
-    # Edit that file to change rails, trigger levels, limits, etc.
-    # Hardcoded defaults below are used only if the config file is missing.
-    RAIL_CONFIGS = _build_rail_configs(_CFG) or [
-        RailConfig("3V6",     "TP2",  3.6,  100, 800,  75.0, 150.0, 30.0),
-        RailConfig("3V3",     "TP10", 3.3,  100, 1500, 75.0, 150.0, 30.0),
-        RailConfig("2V5",     "TP9",  2.5,  100, 750,  50.0, 150.0, 30.0),
-        RailConfig("1V8",     "TP6",  1.8,  100, 1500, 50.0, 150.0, 30.0),
-        RailConfig("1V35",    "TP7",  1.35, 100, 1500, 60.0, 100.0, 20.0),
-        RailConfig("1V_PS",   "TP5",  1.0,  100, 1500, 60.0, 100.0, 20.0),
-        RailConfig("1V_PL",   "TP8",  1.0,  100, 1500, 60.0, 100.0, 20.0),
-        RailConfig("1V1_E0",  "TP13", 1.1,  100, 500,  50.0, 150.0, 20.0),
-        RailConfig("2V5_E0",  "TP14", 2.5,  100, 500,  50.0, 150.0, 30.0),
-        RailConfig("1V8_E0",  "TP15", 1.8,  100, 500,  50.0, 150.0, 30.0),
-    ]
-
-    SCOPE_CONFIG = _build_scope_config(_CFG) or {
-        "3V3":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
-        "2V5":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.447, "trigger_down": 2.498, "bandwidth_mhz": 20},
-        "1V8":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.735, "trigger_down": 1.81,  "bandwidth_mhz": 20},
-        "3V6":    {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 3.225, "trigger_down": 3.30, "bandwidth_mhz": 20},
-        "1V35":   {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 1.293, "trigger_down": 1.382, "bandwidth_mhz": 20},
-        "1V_PS":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.936, "trigger_down": 1.024, "bandwidth_mhz": 20},
-        "1V_PL":  {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 0.934, "trigger_down": 1.035, "bandwidth_mhz": 20},
-        "1V1_E0": {"v_scale": 0.010, "timebase": 50e-6,  "trigger_up": 1.075, "trigger_down": 1.112, "bandwidth_mhz": 20},
-        "2V5_E0": {"v_scale": 0.050, "timebase": 50e-6,  "trigger_up": 2.445, "trigger_down": 2.512, "bandwidth_mhz": 20},
-        "1V8_E0": {"v_scale": 0.050, "timebase": 20e-6,  "trigger_up": 1.763, "trigger_down": 1.807, "bandwidth_mhz": 20},
-    }
+    # ── All config comes from pwrstd06_config.json ──────────────────────
+    # To change rails, trigger levels, limits, etc., edit that JSON file.
+    # There are NO hardcoded fallbacks here — the JSON is the single source of truth.
+    RAIL_CONFIGS = _build_rail_configs(_CFG)   # List of RailConfig objects, one per power rail to test
+    SCOPE_CONFIG = _build_scope_config(_CFG)   # Dict of per-rail oscilloscope settings (v_scale, timebase, triggers)
 
     def __init__(self,
                  oscilloscope_address: Optional[str] = None,
@@ -398,24 +392,29 @@ class PWRSTD06TransientTest:
             electronic_load_address: Where to find the electronic load (auto-find if not provided)
             output_dir: Folder name where to save results (default from config or "pwrstd06_results")
         """
-        # Apply config-file defaults for arguments not passed by the caller
-        instr_cfg = _CFG.get("instrument_addresses", {})
-        if oscilloscope_address is None:
-            oscilloscope_address = instr_cfg.get("oscilloscope")
-        if electronic_load_address is None:
-            electronic_load_address = instr_cfg.get("electronic_load")
-        if output_dir is None:
-            out_cfg = _CFG.get("output_dir", {})
-            if isinstance(out_cfg, dict):
-                output_dir = out_cfg.get("path", "pwrstd06_results")
-            else:
-                output_dir = out_cfg or "pwrstd06_results"
+        # ── Read settings from pwrstd06_config.json ─────────────────────
+        # If the caller didn't pass an address or output_dir, pull it from
+        # the JSON config.  The JSON is the single source of truth.
 
-        # Load timing and other settings from config
-        self._timing = _CFG.get("timing", {})
-        self._eload_cfg = _CFG.get("electronic_load", {})
-        self._scope_settings = _CFG.get("scope_settings", {})
-        self._analysis_cfg = _CFG.get("analysis", {})
+        instr_cfg = _CFG.get("instrument_addresses", {})  # Get the "instrument_addresses" section from JSON
+        if oscilloscope_address is None:                   # If no scope address was passed by the caller...
+            oscilloscope_address = instr_cfg.get("oscilloscope")   # ...use the one from the JSON (or None for auto-detect)
+        if electronic_load_address is None:                # Same for electronic load
+            electronic_load_address = instr_cfg.get("electronic_load")
+
+        if output_dir is None:                             # If no output directory was passed by the caller...
+            out_cfg = _CFG.get("output_dir", {})           # ...read the "output_dir" section from JSON
+            if isinstance(out_cfg, dict):                  # If it's a dict (has sub-keys like "path")...
+                output_dir = out_cfg.get("path", "pwrstd06_results")  # ...grab the "path" value
+            else:
+                output_dir = out_cfg or "pwrstd06_results" # Otherwise use the value directly
+
+        # Pull remaining config sections — each returns {} if the section
+        # is missing, so individual .get() calls below can supply defaults.
+        self._timing = _CFG.get("timing", {})              # Timing delays (stabilize, arm, poll, etc.)
+        self._eload_cfg = _CFG.get("electronic_load", {})  # Electronic load settings (slew rate, OVP/UVP margins)
+        self._scope_settings = _CFG.get("scope_settings", {})  # General scope settings (channel, coupling, probe)
+        self._analysis_cfg = _CFG.get("analysis", {})      # Waveform analysis params (tolerance, ringing threshold)
 
         # Auto-detect instruments if addresses weren't provided
         if oscilloscope_address is None or electronic_load_address is None:
@@ -453,8 +452,19 @@ class PWRSTD06TransientTest:
         self.calculations_dir = self.output_dir / "calculations" # NEW: Subfolder for detailed calculations
 
         # Create all the folders if they don't exist
-        for d in [self.output_dir, self.screenshot_dir, self.reports_dir, self.calculations_dir]:
-            d.mkdir(parents=True, exist_ok=True)  # Make directory (and parent directories if needed)
+        try:
+            for d in [self.output_dir, self.screenshot_dir, self.reports_dir, self.calculations_dir]:
+                d.mkdir(parents=True, exist_ok=True)  # Make directory (and parent directories if needed)
+        except (PermissionError, OSError) as e:
+            fallback_base = Path(__file__).resolve().parent / "pwrstd06_results"
+            self.output_dir = fallback_base / f"run_{timestamp}"
+            self.screenshot_dir = self.output_dir / "screenshots"
+            self.reports_dir = self.output_dir / "reports"
+            self.calculations_dir = self.output_dir / "calculations"
+            for d in [self.output_dir, self.screenshot_dir, self.reports_dir, self.calculations_dir]:
+                d.mkdir(parents=True, exist_ok=True)
+            print(f"WARNING: Failed to create results directory at '{output_dir}' ({e}).")
+            print(f"         Falling back to: {fallback_base}")
 
         # Setup logging (create the logbook for recording what happens)
         self._setup_logging()
@@ -708,12 +718,12 @@ class PWRSTD06TransientTest:
             calc_log.append("\n[STEP 2] CALCULATING DROOP")
 
             if direction == LoadStepDirection.POSITIVE:
-                # Positive step: droop = DC RMS FS - VMIN (how much it drops from settled baseline)
+                # Positive step: droop = DC RMS FS (baseline) - VMIN
                 calc_log.append("  Direction: POSITIVE (load increased → voltage drops)")
                 calc_log.append(f"  DC RMS FS (baseline): {dc_baseline:.4f}V ({dc_baseline*1000:.1f}mV)")
                 calc_log.append(f"  VMIN (minimum voltage): {results['min_v']:.4f}V ({results['min_v']*1000:.1f}mV)")
 
-                if results['min_v'] > 0:
+                if results['min_v'] > 0 and dc_baseline > 0:
                     droop_mv = (dc_baseline - results['min_v']) * 1000
                     results['droop_mv'] = max(0, droop_mv)  # Can't be negative
                     calc_log.append(f"\n  DROOP = DC RMS FS - VMIN")
@@ -722,12 +732,12 @@ class PWRSTD06TransientTest:
                     calc_log.append(f"  ★ DROOP = {results['droop_mv']:.1f}mV (Limit: <{rail.max_droop_mv}mV) {'✓ PASS' if results['droop_mv'] <= rail.max_droop_mv else '✗ FAIL'}")
 
             else:
-                # Negative step: droop = VMAX - DC RMS FS (how much it rises from settled baseline)
+                # Negative step: droop = VMAX - DC RMS FS (baseline)
                 calc_log.append("  Direction: NEGATIVE (load decreased → voltage rises)")
-                calc_log.append(f"  DC RMS FS (baseline): {dc_baseline:.4f}V ({dc_baseline*1000:.1f}mV)")
                 calc_log.append(f"  VMAX (maximum voltage): {results['max_v']:.4f}V ({results['max_v']*1000:.1f}mV)")
+                calc_log.append(f"  DC RMS FS (baseline): {dc_baseline:.4f}V ({dc_baseline*1000:.1f}mV)")
 
-                if results['max_v'] > 0:
+                if results['max_v'] > 0 and dc_baseline > 0:
                     droop_mv = (results['max_v'] - dc_baseline) * 1000
                     results['droop_mv'] = max(0, droop_mv)
                     calc_log.append(f"\n  DROOP = VMAX - DC RMS FS")
@@ -1003,7 +1013,7 @@ class PWRSTD06TransientTest:
                 # Low to high: droop = DC RMS FS - VMIN
                 if dc_rms is not None and v_min is not None:
                     droop_mv = (dc_rms - v_min) * 1000.0
-                    calc_lines.append(f"\nDroop (low_to_high) = DC_RMS_FS - VMIN")
+                    calc_lines.append(f"\nDroop (low_to_high) = DC RMS FS - VMIN")
                     calc_lines.append(f"  = {dc_rms:.4f}V - {v_min:.4f}V")
                     calc_lines.append(f"  = {droop_mv:.1f}mV")
                 else:
@@ -1012,7 +1022,7 @@ class PWRSTD06TransientTest:
                 # High to low: droop = VMAX - DC RMS FS
                 if v_max is not None and dc_rms is not None:
                     droop_mv = (v_max - dc_rms) * 1000.0
-                    calc_lines.append(f"\nDroop (high_to_low) = VMAX - DC_RMS_FS")
+                    calc_lines.append(f"\nDroop (high_to_low) = VMAX - DC RMS FS")
                     calc_lines.append(f"  = {v_max:.4f}V - {dc_rms:.4f}V")
                     calc_lines.append(f"  = {droop_mv:.1f}mV")
                 else:
@@ -1265,10 +1275,14 @@ class PWRSTD06TransientTest:
 
             # Validate baseline is close to expected voltage
             baseline_error_mv = abs(baseline - rail.expected_voltage_v) * 1000
-            if baseline_error_mv > 100:  # More than 100mV off
-                calc_log.append(f"  ⚠ WARNING: Baseline ({baseline:.3f}V) differs from expected ({rail.expected_voltage_v}V) by {baseline_error_mv:.1f}mV")
+            expected_tol_mv = float(self._analysis_cfg.get("expected_voltage_tolerance_mv", 10.0))
+            if baseline_error_mv > expected_tol_mv:
+                calc_log.append(
+                    f"  ⚠ WARNING: Baseline ({baseline:.3f}V) differs from expected ({rail.expected_voltage_v}V) by {baseline_error_mv:.1f}mV "
+                    f"(Acceptance: ±{expected_tol_mv:.1f}mV)"
+                )
             else:
-                calc_log.append(f"  ✓ Baseline matches expected voltage (within {baseline_error_mv:.1f}mV)")
+                calc_log.append(f"  ✓ Baseline matches expected voltage (within ±{expected_tol_mv:.1f}mV)")
 
             # *** STEP 4: GET DATA AFTER THE LOAD STEP ***
             calc_log.append("\n[STEP 4] EXTRACTING POST-TRIGGER DATA (after load step)")
@@ -1580,7 +1594,44 @@ class PWRSTD06TransientTest:
             elif save_choice in ('no', 'n'):
                 # Remove the entire run directory and everything in it
                 try:
-                    shutil.rmtree(self.output_dir)
+                    if hasattr(self, "_logger") and self._logger:
+                        for h in list(self._logger.handlers):
+                            try:
+                                h.flush()
+                            except Exception:
+                                pass
+                            try:
+                                h.close()
+                            except Exception:
+                                pass
+                            try:
+                                self._logger.removeHandler(h)
+                            except Exception:
+                                pass
+                        try:
+                            logging.shutdown()
+                        except Exception:
+                            pass
+
+                    def _on_rm_error(func, path, exc_info):
+                        try:
+                            os.chmod(path, 0o777)
+                        except Exception:
+                            pass
+                        func(path)
+
+                    last_err = None
+                    for _ in range(5):
+                        try:
+                            shutil.rmtree(self.output_dir, onerror=_on_rm_error)
+                            last_err = None
+                            break
+                        except Exception as e:
+                            last_err = e
+                            time.sleep(0.2)
+                    if last_err:
+                        raise last_err
+
                     print("\n  Results discarded. Output folder removed.")
                 except Exception as e:
                     print(f"\n  Could not remove output folder: {e}")
@@ -1805,6 +1856,61 @@ class PWRSTD06TransientTest:
         else:
             lines.append("OVERALL TEST RESULT: INCOMPLETE")
             lines.append(f"{not_tested} rail(s) were not tested.")
+
+        rail_cfg_by_name = {r.name: r for r in self.RAIL_CONFIGS}
+
+        def _step_failure_reasons(step: Optional[TransientResult], rail_cfg: Optional[RailConfig]) -> list[str]:
+            if not step:
+                return ["step missing"]
+            if step.result == "PASS":
+                return []
+            if step.result == "ERROR":
+                return ["measurement error"]
+
+            reasons = []
+            if rail_cfg:
+                if step.droop_mv and step.droop_mv > rail_cfg.max_droop_mv:
+                    reasons.append(f"droop {step.droop_mv:.1f}mV > {rail_cfg.max_droop_mv:.1f}mV")
+                if step.recovery_time_us and step.recovery_time_us > rail_cfg.max_recovery_time_us:
+                    reasons.append(f"recovery {step.recovery_time_us:.1f}µs > {rail_cfg.max_recovery_time_us:.1f}µs")
+                if step.overshoot_mv and step.overshoot_mv > rail_cfg.max_overshoot_mv:
+                    reasons.append(f"overshoot {step.overshoot_mv:.1f}mV > {rail_cfg.max_overshoot_mv:.1f}mV")
+            if step.has_ringing:
+                reasons.append("ringing detected")
+            if not reasons:
+                reasons.append("failed")
+            return reasons
+
+        passed_rails = [r for r in self.results if r.overall_result == "PASS"]
+        failed_rails = [r for r in self.results if r.overall_result == "FAIL"]
+        not_tested_rails = [r for r in self.results if r.overall_result == "NOT_TESTED"]
+
+        if passed_rails:
+            lines.append("")
+            lines.append("RAILS PASSED:")
+            for r in passed_rails:
+                lines.append(f"  - {r.rail_name}")
+
+        if failed_rails:
+            lines.append("")
+            lines.append("RAILS FAILED (reason):")
+            for r in failed_rails:
+                cfg = rail_cfg_by_name.get(r.rail_name)
+                pos_reasons = _step_failure_reasons(r.positive_step, cfg)
+                neg_reasons = _step_failure_reasons(r.negative_step, cfg)
+                reason_parts = []
+                if pos_reasons:
+                    reason_parts.append("LOW→HIGH: " + ", ".join(pos_reasons))
+                if neg_reasons:
+                    reason_parts.append("HIGH→LOW: " + ", ".join(neg_reasons))
+                reason_str = " | ".join(reason_parts) if reason_parts else "failed"
+                lines.append(f"  - {r.rail_name}: {reason_str}")
+
+        if not_tested_rails:
+            lines.append("")
+            lines.append("RAILS NOT TESTED:")
+            for r in not_tested_rails:
+                lines.append(f"  - {r.rail_name}")
 
         lines.append("=" * table_w)
         lines.append("")
