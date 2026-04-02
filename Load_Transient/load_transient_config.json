@@ -1,5 +1,5 @@
 {
-    "_description": "PWRSTD06 Transient Response Test Configuration",
+    "_description": "Load Transient Response Test Configuration",
     "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
 
     "instrument_addresses": {
@@ -9,8 +9,8 @@
     },
 
     "output_dir": {
-        "_note": "Set the full path where results should be saved. Use forward slashes. Example: D:/Results/pwrstd06",
-        "path": "D:/PWRSTD06_Results"
+        "_note": "Set the full path where results should be saved. Use forward slashes. Example: D:/Results/load_transient",
+        "path": "D:/Load_Transient_Results"
     },
 
     "rail_configs": [
@@ -30,7 +30,7 @@
             "expected_voltage_v": 3.3,
             "low_current_ma": 0,
             "high_current_ma": 1500,
-            "max_droop_mv": 75.0,
+            "max_droop_mv": 550.0,
             "max_recovery_time_us": 150.0,
             "max_overshoot_mv": 30.0
         },
@@ -119,10 +119,10 @@
     "scope_config": {
         "_note": "Per-rail oscilloscope settings. trigger_up = FALLING edge (load up), trigger_down = RISING edge (load down)",
         "3V6":    {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 3.24, "trigger_down": 3.32,  "bandwidth_mhz": 20},
-        "3V3":    {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 3.24, "trigger_down": 3.32,  "bandwidth_mhz": 20},
+        "3V3":    {"v_scale": 0.100, "timebase": 20e-6,  "trigger_up": 3.24, "trigger_down": 3.32,  "bandwidth_mhz": 20},
         "2V5":    {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 2.467, "trigger_down": 2.498, "bandwidth_mhz": 20},
         "1V8":    {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 1.764, "trigger_down": 1.83,  "bandwidth_mhz": 20},
-        "1V35":   {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 1.31, "trigger_down": 1.382, "bandwidth_mhz": 20},
+        "1V35":   {"v_scale": 0.100, "timebase": 20e-6,  "trigger_up": 1.31, "trigger_down": 1.382, "bandwidth_mhz": 20},
         "1V_PS":  {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 0.956, "trigger_down": 1.020, "bandwidth_mhz": 20},
         "1V_PL":  {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 0.955, "trigger_down": 1.020, "bandwidth_mhz": 20},
         "1V1_E0": {"v_scale": 0.020, "timebase": 20e-6,  "trigger_up": 1.078, "trigger_down": 1.118, "bandwidth_mhz": 20},

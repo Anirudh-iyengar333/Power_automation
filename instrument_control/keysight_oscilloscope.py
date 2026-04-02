@@ -622,6 +622,56 @@ class KeysightDSOX6004A:
     # ROOT ACQUISITION CONTROL - RUN, STOP, SINGLE, DIGITIZE
     # ============================================================================
 
+    def set_bandwidth_limit(self, channel: int, enable: bool) -> bool:
+        """
+        Enable or disable the 20 MHz bandwidth limit filter on a channel.
+
+        SCPI: :CHANnel<n>:BWLimit {ON|OFF}
+        """
+        if not self.is_connected:
+            return False
+        try:
+            state = "ON" if enable else "OFF"
+            self._scpi_wrapper.write(f":CHANnel{channel}:BWLimit {state}")
+            time.sleep(0.05)
+            self._logger.info(f"CH{channel} bandwidth limit: {state}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set bandwidth limit: {type(e).__name__}: {e}")
+            return False
+
+    def get_acquisition_state(self) -> Optional[str]:
+        """
+        Query the current acquisition run state.
+
+        SCPI: :RSTate?
+        Returns: "RUN", "STOP", "SING" or None on error
+        """
+        if not self.is_connected:
+            return None
+        try:
+            return self._scpi_wrapper.query(":RSTate?").strip()
+        except Exception as e:
+            self._logger.error(f"Failed to get acquisition state: {type(e).__name__}: {e}")
+            return None
+
+    def force_trigger(self) -> bool:
+        """
+        Force an immediate trigger when the scope is waiting for a trigger event.
+
+        SCPI: :TRIGger:FORCe
+        """
+        if not self.is_connected:
+            return False
+        try:
+            self._scpi_wrapper.write(":TRIGger:FORCe")
+            time.sleep(0.1)
+            self._logger.info("Trigger forced")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to force trigger: {type(e).__name__}: {e}")
+            return False
+
     def run(self) -> bool:
         """
         Start continuous acquisition
@@ -1408,10 +1458,46 @@ class KeysightDSOX6004A:
             self._logger.error(f"Failed to set marker Y position: {type(e).__name__}: {e}")
             return False
 
+    def set_marker_x1y1_source(self, channel: int) -> bool:
+        """
+        Set source channel for marker 1 (X1/Y1).
+        Must be called after set_marker_mode("WAVeform") and before setting positions.
+
+        SCPI: :MARKer:X1Y1Source CHANnel<n>  (pg 607)
+        """
+        if not self.is_connected:
+            return False
+        try:
+            self._scpi_wrapper.write(f":MARKer:X1Y1Source CHANnel{channel}")
+            time.sleep(0.05)
+            self._logger.info(f"Marker X1Y1 source set to CHANnel{channel}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set marker X1Y1 source: {type(e).__name__}: {e}")
+            return False
+
+    def set_marker_x2y2_source(self, channel: int) -> bool:
+        """
+        Set source channel for marker 2 (X2/Y2).
+        Must be called after set_marker_mode("WAVeform") and before setting positions.
+
+        SCPI: :MARKer:X2Y2Source CHANnel<n>  (pg 608)
+        """
+        if not self.is_connected:
+            return False
+        try:
+            self._scpi_wrapper.write(f":MARKer:X2Y2Source CHANnel{channel}")
+            time.sleep(0.05)
+            self._logger.info(f"Marker X2Y2 source set to CHANnel{channel}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set marker X2Y2 source: {type(e).__name__}: {e}")
+            return False
+
     def get_marker_x_delta(self) -> Optional[float]:
         """
         Get X delta (time difference) between markers
-        
+
         - VERIFIED: :MARKer:XDELta? query from manual page 609
         
         Returns:
@@ -1449,6 +1535,34 @@ class KeysightDSOX6004A:
         except Exception as e:
             self._logger.error(f"Failed to get marker Y delta: {type(e).__name__}: {e}")
             return None
+
+    def show_screen_annotation(self, text: str) -> bool:
+        """
+        Display a text annotation on the oscilloscope screen.
+
+        SCPI: :DISPlay:ANNotation:TEXT  (pg 275)
+              :DISPlay:ANNotation:STATe (pg 274)
+
+        Args:
+            text: String to display (max ~64 chars). Pass empty string "" to clear.
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            return False
+        try:
+            if text:
+                self._scpi_wrapper.write(f':DISPlay:ANNotation:TEXT "{text}"')
+                self._scpi_wrapper.write(":DISPlay:ANNotation:STATe ON")
+            else:
+                self._scpi_wrapper.write(":DISPlay:ANNotation:STATe OFF")
+            time.sleep(0.05)
+            self._logger.info(f"Screen annotation set: {text!r}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set screen annotation: {type(e).__name__}: {e}")
+            return False
 
     # ============================================================================
     # MATH FUNCTIONS - FUNCtion SUBSYSTEM

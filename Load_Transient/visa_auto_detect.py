@@ -251,9 +251,9 @@ def detect_all_instruments(verbose: bool = False) -> Dict[str, InstrumentInfo]:
     return detector.detect_all_instruments()
 
 
-def detect_pwrstd06_instruments() -> Tuple[Optional[str], Optional[str]]:
+def detect_load_transient_instruments() -> Tuple[Optional[str], Optional[str]]:
     """
-    Detect instruments specifically needed for PWRSTD06 test
+    Detect instruments specifically needed for Load Transient test
 
     Returns:
         Tuple of (oscilloscope_address, electronic_load_address)

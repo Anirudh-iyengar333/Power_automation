@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PWRSTD06 Test Configuration File
+Load Transient Test Configuration File
 
 Centralized configuration for transient response test parameters.
 Modify these values to match your specific test setup and requirements.
@@ -79,8 +79,8 @@ class RailLimits:
         }
 
 
-class PWRSTD06Config:
-    """Complete PWRSTD06 test configuration"""
+class LoadTransientConfig:
+    """Complete Load Transient test configuration"""
     
     def __init__(self):
         self.instruments = InstrumentConfig()
@@ -89,7 +89,7 @@ class PWRSTD06Config:
         
     def _get_standard_rail_limits(self) -> List[RailLimits]:
         """
-        Define standard rail limits per PWRSTD06 specification
+        Define standard rail limits per Load Transient specification
 
         Load Step Procedure: Set load to 100mA, increase to half of rated current in 100ns
 
@@ -297,9 +297,9 @@ class QuickConfigs:
     """Pre-defined configurations for common test setups"""
     
     @staticmethod
-    def tektronix_mso24_keithley_setup() -> PWRSTD06Config:
+    def tektronix_mso24_keithley_setup() -> LoadTransientConfig:
         """Configuration for Tektronix MSO24 + Keithley Power Supply + Keithley 2380 Load"""
-        config = PWRSTD06Config()
+        config = LoadTransientConfig()
         config.instruments.oscilloscope_address = "USB0::0x0699::0x0522::C012345::INSTR"
         config.instruments.oscilloscope_type = "tektronix_mso24"
         config.instruments.power_supply_address = "USB0::0x05E6::0x2230::1234567::INSTR"  # Your Keithley PSU
@@ -308,9 +308,9 @@ class QuickConfigs:
         return config
     
     @staticmethod
-    def keysight_dsox6004a_keithley_setup() -> PWRSTD06Config:
+    def keysight_dsox6004a_keithley_setup() -> LoadTransientConfig:
         """Configuration for Keysight DSOX6004A + Keithley Power Supply + Keithley 2380 Load"""
-        config = PWRSTD06Config()
+        config = LoadTransientConfig()
         config.instruments.oscilloscope_address = "USB0::0x0957::0x179B::MY12345678::INSTR"
         config.instruments.oscilloscope_type = "keysight_dsox6004a"
         config.instruments.power_supply_address = "USB0::0x05E6::0x2230::1234567::INSTR"  # Your Keithley PSU
@@ -319,9 +319,9 @@ class QuickConfigs:
         return config
     
     @staticmethod
-    def keysight_hd304mso_keithley_setup() -> PWRSTD06Config:
+    def keysight_hd304mso_keithley_setup() -> LoadTransientConfig:
         """Configuration for Keysight HD304MSO + Keithley Power Supply + Keithley 2380 Load"""
-        config = PWRSTD06Config()
+        config = LoadTransientConfig()
         config.instruments.oscilloscope_address = "USB0::0x0957::0x1780::MY65220169::INSTR"
         config.instruments.oscilloscope_type = "keysight_hd304mso"
         config.instruments.power_supply_address = "USB0::0x05E6::0x2230::805224014806770001::INSTR"  # Your Keithley PSU
@@ -347,11 +347,11 @@ class QuickConfigs:
 
 def main():
     """Example usage and configuration generation"""
-    print("PWRSTD06 Configuration Generator")
+    print("Load Transient Configuration Generator")
     print("=" * 40)
     
     # Create default configuration
-    config = PWRSTD06Config()
+    config = LoadTransientConfig()
     
     # Show available rails
     print(f"Available Rails ({len(config.rail_limits)}):")
@@ -365,7 +365,7 @@ def main():
     print(f"  Ethernet: {QuickConfigs.ethernet_rails_only()}")
     
     # Save default configuration
-    config_path = "pwrstd06_config.json"
+    config_path = "load_transient_config.json"
     config.save_config(config_path)
     print(f"\n✓ Default configuration saved to: {config_path}")
     
@@ -378,12 +378,12 @@ def main():
     config.test_params.scope_time_base_ms = 5.0  # Use 5ms/div instead of 1ms/div
     
     # Save customized configuration
-    custom_config_path = "pwrstd06_config_custom.json"
+    custom_config_path = "load_transient_config_custom.json"
     config.save_config(custom_config_path)
     print(f"✓ Custom configuration saved to: {custom_config_path}")
     
     print(f"\nTo use custom config in test:")
-    print(f"  config = PWRSTD06Config()")
+    print(f"  config = LoadTransientConfig()")
     print(f"  config.load_config('{custom_config_path}')")
 
 

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-PWRSTD06: Transient Response Test Runner
+Load Transient Response Test Runner
 
-Simple runner script for PWRSTD06 transient response testing with auto-detection
+Simple runner script for Load Transient transient response testing with auto-detection
 of VISA instruments.
 
 Usage:
-    python run_pwrstd06_test.py                    # Interactive rail selection
-    python run_pwrstd06_test.py --scope <addr>     # Specify scope address
-    python run_pwrstd06_test.py --load <addr>      # Specify load address
-    python run_pwrstd06_test.py --list             # List available instruments
-    python run_pwrstd06_test.py --rails 3V6,3V3    # Test specific rails only (skip selector)
+    python run_load_transient_test.py                    # Interactive rail selection
+    python run_load_transient_test.py --scope <addr>     # Specify scope address
+    python run_load_transient_test.py --load <addr>      # Specify load address
+    python run_load_transient_test.py --list             # List available instruments
+    python run_load_transient_test.py --rails 3V6,3V3    # Test specific rails only (skip selector)
 """
 
 import sys
@@ -159,7 +159,7 @@ def print_banner():
     """Print test banner"""
     print()
     print("=" * 70)
-    print(" PWRSTD06: TRANSIENT RESPONSE TEST")
+    print(" LOAD TRANSIENT RESPONSE TEST")
     print(" Validates regulator control loop bandwidth, damping, and oscillation")
     print("=" * 70)
     print()
@@ -180,7 +180,7 @@ def print_banner():
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
-        description="PWRSTD06 Transient Response Test Runner",
+        description="Load Transient Response Test Runner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -199,7 +199,7 @@ Examples:
                         help='Electronic load VISA address')
     parser.add_argument('--rails', type=str, default=None,
                         help='Comma-separated list of rails to test (e.g., "3V6,3V3,1V8")')
-    parser.add_argument('--output', type=str, default='pwrstd06_results',
+    parser.add_argument('--output', type=str, default='load_transient_results',
                         help='Output directory for results')
 
     args = parser.parse_args()
@@ -226,10 +226,10 @@ Examples:
 
     # Import the test module
     try:
-        from pwrstd06_transient_response_test import PWRSTD06TransientTest
+        from load_transient_response_test import LoadTransientTest
     except ImportError as e:
         print(f"\nERROR: Failed to import test module: {e}")
-        print("Make sure pwrstd06_transient_response_test.py is in the same directory")
+        print("Make sure load_transient_response_test.py is in the same directory")
         return 1
 
     # Determine which rails to test
@@ -240,7 +240,7 @@ Examples:
         print(f"\nRails to test: {', '.join(rails_to_test)}")
     else:
         # Interactive rail selection
-        rails_to_test = interactive_rail_selector(PWRSTD06TransientTest.RAIL_CONFIGS)
+        rails_to_test = interactive_rail_selector(LoadTransientTest.RAIL_CONFIGS)
         if rails_to_test is None:
             print("Test cancelled.")
             return 0
@@ -251,7 +251,7 @@ Examples:
 
     # Create test instance (auto-detection happens here if addresses are None)
     try:
-        test = PWRSTD06TransientTest(
+        test = LoadTransientTest(
             oscilloscope_address=scope_addr,
             electronic_load_address=load_addr,
             output_dir=args.output
