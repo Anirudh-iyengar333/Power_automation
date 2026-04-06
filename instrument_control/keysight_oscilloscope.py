@@ -38,6 +38,7 @@ class KeysightDSOX6004A:
         self._logger = logging.getLogger(f'{self.__class__.__name__}.{id(self)}')
         self.max_channels = 4
         self.max_sample_rate = 20e9
+        self.screenshot_dir = None   # set by setup_output_directories() or overridden externally
         self.max_memory_depth = 16e6
         self.bandwidth_hz = 1e9
 
@@ -1970,7 +1971,8 @@ class KeysightDSOX6004A:
         acquisition_was_running = False
 
         try:
-            self.setup_output_directories()
+            if self.screenshot_dir is None:
+                self.setup_output_directories()
 
             # FREEZE ACQUISITION: Stop the scope to preserve the current waveform
             if freeze_acquisition:
@@ -2289,14 +2291,15 @@ class KeysightDSOX6004A:
             return None
 
     def setup_output_directories(self) -> None:
-        """Create default output directories"""
+        """Create default output directories (screenshot_dir is not overwritten if already set)."""
         base_path = Path.cwd()
-        self.screenshot_dir = base_path / "oscilloscope_screenshots"
+        if self.screenshot_dir is None:
+            self.screenshot_dir = base_path / "oscilloscope_screenshots"
         self.data_dir = base_path / "oscilloscope_data"
         self.graph_dir = base_path / "oscilloscope_graphs"
 
         for directory in [self.screenshot_dir, self.data_dir, self.graph_dir]:
-            directory.mkdir(exist_ok=True)
+            directory.mkdir(parents=True, exist_ok=True)
 
     def configure_function_generator(self, generator: int, waveform: str = "SIN",
                                      frequency: float = 1000.0, amplitude: float = 1.0,
