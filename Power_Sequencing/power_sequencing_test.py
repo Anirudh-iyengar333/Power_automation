@@ -534,7 +534,7 @@ class PowerSequencingTest:
             )
             if path:
                 self._logger.info(f"Screenshot saved: {path}")
-                print(f"  Screenshot : screenshots/{fname}")
+                print(f"  Saved: screenshots/{fname}")
             return path
         except Exception as e:
             self._logger.error(f"Cursor/screenshot error for {ch_cfg.name}: {e}")
@@ -551,7 +551,7 @@ class PowerSequencingTest:
         try:
             path = self._scope.capture_screenshot(filename=filename, freeze_acquisition=False)
             if path:
-                print(f"  Screenshot : screenshots/{filename}")
+                print(f"  Saved: screenshots/{filename}")
             return path
         except Exception as e:
             self._logger.error(f"Full screenshot error: {e}")
