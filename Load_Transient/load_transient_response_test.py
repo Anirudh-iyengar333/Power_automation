@@ -3056,76 +3056,31 @@ class LoadTransientTest:
         self.disconnect_instruments()
 
         # ─── PRINT SUMMARY TO CONSOLE ──────────────────────────────────────
-        # Always show summary so user can review before deciding
         self._print_summary()
 
-        # ─── ASK USER WHETHER TO SAVE RESULTS ──────────────────────────────
-        # At this point, results are in memory. User decides whether to save or discard them.
-        print(f"\n{'─' * 70}")
-        print(f"  Results would be saved to: {self.output_dir}")
-        print(f"{'─' * 70}")
-        
+        # ─── SAVE / DISCARD PROMPT ─────────────────────────────────────────
+        print()
+        print("  " + "─" * 54)
         while True:
-            save_choice = input("  Save results? (yes/no): ").strip().lower()
-            if save_choice in ('yes', 'y'):
-                # ─── GENERATE AND SAVE REPORTS ────────────────────────────
-                # Create CSV, JSON, text files with results
+            choice = input("  Save results? [Y/n]: ").strip().lower()
+            if choice in ("", "y", "yes"):
+                print()
+                print("  Writing reports...")
                 self._generate_reports()
-                print(f"\n  Results saved to: {self.output_dir}")
+                print()
+                print(f"  Results saved in: {self.output_dir}")
+                print()
                 break
-            elif save_choice in ('no', 'n'):
-                # ─── DISCARD ALL RESULTS ───────────────────────────────────
-                # Close every logging handler on every logger (root + children)
-                # so Windows releases the lock on load_transient_test.log before deletion.
-                for name, lgr in list(logging.Logger.manager.loggerDict.items()):
-                    if isinstance(lgr, logging.Logger):
-                        for h in list(lgr.handlers):
-                            try: h.flush()
-                            except Exception: pass
-                            try: h.close()
-                            except Exception: pass
-                            try: lgr.removeHandler(h)
-                            except Exception: pass
-                for h in list(logging.root.handlers):
-                    try: h.flush()
-                    except Exception: pass
-                    try: h.close()
-                    except Exception: pass
-                    try: logging.root.removeHandler(h)
-                    except Exception: pass
-                try: logging.shutdown()
-                except Exception: pass
-
-                time.sleep(0.3)  # Let Windows release file locks
-
-                # Delete the entire run folder (screenshots, calculations, reports, log)
-                output_dir = self.output_dir
-                deleted = False
-                if output_dir.exists():
-                    def _force_delete(func, path, exc_info):
-                        try: os.chmod(path, 0o777)
-                        except Exception: pass
-                        try: func(path)
-                        except Exception: pass
-
-                    for _ in range(5):
-                        try:
-                            shutil.rmtree(output_dir, onerror=_force_delete)
-                            if not output_dir.exists():
-                                deleted = True
-                                break
-                        except Exception:
-                            pass
-                        time.sleep(0.3)
-
-                if deleted:
-                    print("\n  Results discarded — run folder deleted.")
-                else:
-                    print(f"\n  Could not fully delete: {output_dir}")
-                    print("  Some files may still remain (close any open file handles and delete manually).")
+            elif choice in ("n", "no"):
+                try:
+                    shutil.rmtree(self.output_dir)
+                    print(f"  Run folder deleted: {self.output_dir}")
+                except Exception as e:
+                    print(f"  WARNING: Could not delete run folder: {e}")
+                print()
                 break
             else:
-                print("  Please enter 'yes' or 'no'")
+                print("  Please enter Y or N.")
 
         return True
 
@@ -3259,6 +3214,7 @@ class LoadTransientTest:
             json.dump(report_data, f, indent=2, cls=NumpyEncoder)
 
         self._logger.info(f"JSON report saved: {json_path}")
+        print(f"  Saved: reports/{json_path.name}")
 
         # CSV report (droop-focused with trigger values)
         csv_path = self.reports_dir / f"load_transient_results_{timestamp}.csv"
@@ -3290,7 +3246,7 @@ class LoadTransientTest:
                         ])
 
         self._logger.info(f"CSV report saved: {csv_path}")
-        self._logger.info(f"  Note: CSV includes references to detailed calculation files in 'calculations' folder")
+        print(f"  Saved: reports/{csv_path.name}")
 
         # Text summary
         summary_path = self.reports_dir / f"load_transient_summary_{timestamp}.txt"
@@ -3298,6 +3254,7 @@ class LoadTransientTest:
             f.write(self._generate_summary_text())
 
         self._logger.info(f"Summary saved: {summary_path}")
+        print(f"  Saved: reports/{summary_path.name}")
 
         # Generate index of detailed calculation files
         calc_index_path = self.calculations_dir / "README.txt"
@@ -3339,6 +3296,7 @@ class LoadTransientTest:
             f.write("=" * 80 + "\n")
 
         self._logger.info(f"Calculation index saved: {calc_index_path}")
+        print(f"  Saved: calculations/{calc_index_path.name}")
 
     def _generate_summary_text(self) -> str:
         """
@@ -3701,12 +3659,6 @@ class LoadTransientTest:
         summary_text = self._generate_summary_text()
         colorized = "\n".join(_colorize_line(l) for l in summary_text.split("\n"))
         print("\n" + colorized)
-        print(f"\nResults saved to: {self.output_dir}")
-        print(f"  ├─ screenshots/     - Oscilloscope waveform captures")
-        print(f"  ├─ reports/         - CSV, JSON, and summary reports")
-        print(f"  └─ calculations/    - Detailed step-by-step calculation logs")
-        print(f"\nTIP: Check the 'calculations' folder for detailed breakdowns")
-        print(f"     of how droop, recovery time, and overshoot were calculated.")
 
 
 def main():
