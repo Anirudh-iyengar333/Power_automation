@@ -344,6 +344,8 @@ Examples:
     test = InputRangeOVPTest(output_dir=output_dir)
 
     # ── Run selected mode ─────────────────────────────────────────────────────
+    success = False
+
     if mode == 'fixed':
         print("\n  Running Fixed Vin tests only.")
         if not test._connect_instruments():
@@ -357,7 +359,7 @@ Examples:
                 status="NOT_RUN"
             )
             verdict = test._generate_reports(fixed_results, empty_sweep)
-            return 0 if verdict == "PASS" else 1
+            success = (verdict == "PASS")
         finally:
             test._disconnect_instruments()
 
@@ -372,13 +374,48 @@ Examples:
             test._plot_sweep(sweep_result)
             print("\n  Writing reports...")
             test._generate_reports([], sweep_result)
-            return 0 if sweep_result.status == "PASS" else 1
+            success = (sweep_result.status == "PASS")
         finally:
             test._disconnect_instruments()
 
     else:  # full
         success = test.run()
-        return 0 if success else 1
+
+    # ── Save or discard prompt ────────────────────────────────────────────────
+    print()
+    while True:
+        save_resp = input("  Save results? [Y/n]: ").strip().lower()
+        if save_resp in ('', 'y', 'yes'):
+            print(f"  Results saved: {test._run_dir}")
+            print()
+            break
+        elif save_resp in ('n', 'no'):
+            import shutil
+            import subprocess
+            for handler in list(test._logger.handlers):
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                test._logger.removeHandler(handler)
+            try:
+                subprocess.run(
+                    ['cmd', '/c', 'rmdir', '/s', '/q', str(test._run_dir)],
+                    capture_output=True, timeout=5
+                )
+            except Exception:
+                pass
+            if test._run_dir.exists():
+                shutil.rmtree(test._run_dir, ignore_errors=True)
+            if test._run_dir.exists():
+                print(f"  WARNING: Could not fully delete run folder (OneDrive may still be syncing).")
+                print(f"  Delete manually: {test._run_dir}")
+            else:
+                print("  Results discarded — run folder deleted.")
+            print()
+            break
+
+    return 0 if success else 1
 
 
 if __name__ == "__main__":

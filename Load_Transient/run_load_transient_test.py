@@ -296,6 +296,40 @@ Examples:
     # Run the test
     success = test.run_test_sequence(rails=rails_to_test)
 
+    # ── Save or discard prompt ────────────────────────────────────────────────
+    print()
+    while True:
+        save_resp = input("  Save results? [Y/n]: ").strip().lower()
+        if save_resp in ('', 'y', 'yes'):
+            print(f"  Results saved: {test.output_dir}")
+            print()
+            break
+        elif save_resp in ('n', 'no'):
+            import shutil
+            import subprocess
+            for handler in list(test._logger.handlers):
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                test._logger.removeHandler(handler)
+            try:
+                subprocess.run(
+                    ['cmd', '/c', 'rmdir', '/s', '/q', str(test.output_dir)],
+                    capture_output=True, timeout=5
+                )
+            except Exception:
+                pass
+            if test.output_dir.exists():
+                shutil.rmtree(test.output_dir, ignore_errors=True)
+            if test.output_dir.exists():
+                print(f"  WARNING: Could not fully delete run folder (OneDrive may still be syncing).")
+                print(f"  Delete manually: {test.output_dir}")
+            else:
+                print("  Results discarded — run folder deleted.")
+            print()
+            break
+
     return 0 if success else 1
 
 
