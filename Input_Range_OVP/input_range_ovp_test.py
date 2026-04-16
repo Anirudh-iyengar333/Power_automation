@@ -856,8 +856,8 @@ class InputRangeOVPTest:
         plt.tight_layout()
         # Build the full output file path for the PSU sweep graph
         p1 = self._plots_dir / f"psu_sweep_{self._timestamp}.png"
-        # Save Figure 1 to a PNG file at 150 DPI with tight bounding box
-        fig1.savefig(str(p1), dpi=150, bbox_inches='tight')
+        # Save Figure 1 to a PNG file at 1200 DPI with tight bounding box
+        fig1.savefig(str(p1), dpi=1200, bbox_inches='tight')
         # Close Figure 1 to free memory
         plt.close(fig1)
         # Print a confirmation message showing where the PSU graph was saved
@@ -883,8 +883,8 @@ class InputRangeOVPTest:
         plt.tight_layout()
         # Build the full output file path for the DMM sweep graph
         p2 = self._plots_dir / f"dmm_sweep_{self._timestamp}.png"
-        # Save Figure 2 to a PNG file at 150 DPI
-        fig2.savefig(str(p2), dpi=150, bbox_inches='tight')
+        # Save Figure 2 to a PNG file at 1200 DPI
+        fig2.savefig(str(p2), dpi=1200, bbox_inches='tight')
         # Close Figure 2 to free memory
         plt.close(fig2)
         # Print a confirmation message showing where the DMM graph was saved
