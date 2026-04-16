@@ -303,10 +303,23 @@ class InputRangeOVPTest:
         # Extract the test parameters section from the config dictionary
         p        = _CFG.get("test_parameters", {})
 
-        # Read the VISA address of the power supply from the config and store it
-        self._psu_address       = instr["psu"]
-        # Read the VISA address of the digital multimeter from the config and store it
-        self._dmm_address       = instr["dmm"]
+        # ── VISA auto-detection ───────────────────────────────────────────────
+        # Try to auto-detect the PSU and DMM on the VISA bus first.
+        # If detection succeeds the discovered address is used; if it fails
+        # (no instrument found or pyvisa not available) we fall back to the
+        # address hardcoded in the config file.
+        _detected_psu_addr: Optional[str] = None
+        _detected_dmm_addr: Optional[str] = None
+        try:
+            from visa_auto_detect import detect_input_range_ovp_instruments
+            print("\nAuto-detecting instruments on VISA bus...")
+            _detected_psu_addr, _detected_dmm_addr = detect_input_range_ovp_instruments()
+        except ImportError:
+            pass  # visa_auto_detect not available — use config addresses
+
+        # Use detected address when available, otherwise fall back to config
+        self._psu_address = _detected_psu_addr if _detected_psu_addr else instr.get("psu")
+        self._dmm_address = _detected_dmm_addr if _detected_dmm_addr else instr.get("dmm")
         # Read the power supply channel number from the config; default to channel 1 if not specified
         self._psu_channel       = settings.get("psu_channel", 1)
         # Read the communication timeout for the power supply in milliseconds; default to 10 seconds

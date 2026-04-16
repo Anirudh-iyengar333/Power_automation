@@ -333,10 +333,20 @@ class PowerSequencingTest:
         # Read the 'scope_settings' section from the config — contains the timebase, trigger, coupling, bandwidth, and timing settings for the oscilloscope.
         scp_cfg  = _CFG.get("scope_settings", {})
 
-        # Store the VISA address string for the power supply (e.g. "USB0::...") so it can be used when opening the connection.
-        self._psu_address     = instr["psu"]
-        # Store the VISA address string for the oscilloscope so it can be used when opening the connection.
-        self._scope_address   = instr["scope"]
+        # ── VISA auto-detection ───────────────────────────────────────────────
+        # Try to auto-detect the PSU and oscilloscope on the VISA bus first.
+        # Falls back to the config address if detection fails.
+        _detected_psu_addr: Optional[str]   = None
+        _detected_scope_addr: Optional[str] = None
+        try:
+            from visa_auto_detect import detect_power_sequencing_instruments
+            print("\nAuto-detecting instruments on VISA bus...")
+            _detected_psu_addr, _detected_scope_addr = detect_power_sequencing_instruments()
+        except ImportError:
+            pass  # visa_auto_detect not available — use config addresses
+
+        self._psu_address   = _detected_psu_addr   if _detected_psu_addr   else instr.get("psu")
+        self._scope_address = _detected_scope_addr if _detected_scope_addr else instr.get("scope")
 
         # Store which output channel on the power supply to use (typically 1).
         self._psu_channel     = psu_cfg.get("channel", 1)

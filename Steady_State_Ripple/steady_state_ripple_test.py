@@ -275,8 +275,18 @@ class SteadyStateRippleTest:
         # Extract the 'scope_settings' section from the config dictionary, which holds all oscilloscope timing and measurement parameters
         scp_cfg = _CFG.get("scope_settings", {})
 
-        # Store the VISA address string for the oscilloscope so the connect method can open the connection later
-        self._scope_address   = instr["scope"]
+        # ── VISA auto-detection ───────────────────────────────────────────────
+        # Try to auto-detect the oscilloscope on the VISA bus first.
+        # Falls back to the config address if detection fails.
+        _detected_scope_addr: Optional[str] = None
+        try:
+            from visa_auto_detect import detect_steady_state_ripple_instruments
+            print("\nAuto-detecting instruments on VISA bus...")
+            (_detected_scope_addr,) = detect_steady_state_ripple_instruments()
+        except ImportError:
+            pass  # visa_auto_detect not available — use config address
+
+        self._scope_address = _detected_scope_addr if _detected_scope_addr else instr.get("scope")
         # Store the probe attenuation ratio (e.g. 1.0 for a 1:1 probe); this is sent to the oscilloscope so it can correctly scale the voltage readings
         self._probe_atten     = scp_cfg.get("probe_attenuation", 1.0)
         # Store whether the 20 MHz bandwidth limit should be enabled on the oscilloscope; limiting the bandwidth reduces high-frequency noise in the measurement
