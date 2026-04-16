@@ -333,7 +333,7 @@ Line-by-line comments explain non-obvious logic.
 import logging          # Tool for recording what the program is doing (like a logbook)
 import time            # Tool for waiting/pausing and tracking time
 import csv             # Tool for saving data in spreadsheet format
-import json
+import json            # Tool for reading and writing JSON files (the config and results file format)
 import numpy as np     # For numpy type checking in JSON encoder
 
 
@@ -379,14 +379,33 @@ import os              # Operating system tools for file management (like creati
 import shutil          # Tool for removing directories and files safely
 
 # ─── ANSI colour constants (terminal/console output only) ─────────────────────
+# ANSI escape codes are special character sequences that instruct the terminal to change text colour.
+# They only affect how text is displayed on screen — they are invisible in files or documents.
+# Green is used for PASS results to draw the eye positively
 _C_GREEN   = "\033[92m"
+# Red is used for FAIL results to immediately signal a problem
 _C_RED     = "\033[91m"
+# Yellow is used for WARNING or NOT TESTED results — attention but not an error
 _C_YELLOW  = "\033[93m"
+# Cyan is used for informational highlighting (headings, labels)
 _C_CYAN    = "\033[96m"
+# Reset code reverts the terminal back to its default colour after a coloured string
 _C_RESET   = "\033[0m"
 
 def _c(text: str, code: str) -> str:
-    """Wrap text with an ANSI colour code followed by a reset."""
+    """Wrap text with an ANSI colour code followed by a reset.
+
+    Applies a colour code before the text and the reset code after it,
+    so only this specific text is coloured and surrounding text is unaffected.
+
+    Args:
+        text: The string to colour (e.g., "PASS" or "FAIL")
+        code: One of the _C_* colour constants (e.g., _C_GREEN)
+
+    Returns:
+        The text wrapped in colour codes (e.g., "\033[92mPASS\033[0m")
+    """
+    # Wrap the text: colour-on prefix + text content + colour-off (reset) suffix
     return f"{code}{text}{_C_RESET}"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1430,22 +1449,31 @@ class LoadTransientTest:
         - Fast (computed by scope, not user software)
         - Comparable to manual cursor measurements
         """
+        # Import numpy here (instead of top of file) to avoid issues if numpy is not installed
+        # numpy provides fast array math used for waveform statistics
         import numpy as np
 
+        # Initialize the results dictionary with FAIL-safe default values
+        # Using 2× the limit as default ensures any measurement failure appears as a FAIL,
+        # not a fake PASS — this is a deliberate safety choice
         results = {
-            'droop_mv': rail.max_droop_mv * 2.0,  # Default FAIL value
-            'overshoot_mv': rail.max_overshoot_mv * 2.0,
-            'recovery_us': rail.max_recovery_time_us * 2.0,
-            'baseline_v': rail.expected_voltage_v,
-            'min_v': 0.0,
-            'max_v': 0.0,
-            'method': 'FAILED',
-            'calc_log': []
+            'droop_mv': rail.max_droop_mv * 2.0,          # Default FAIL value (2× limit = guaranteed fail)
+            'overshoot_mv': rail.max_overshoot_mv * 2.0,  # Default overshoot FAIL value
+            'recovery_us': rail.max_recovery_time_us * 2.0,  # Default recovery time FAIL value
+            'baseline_v': rail.expected_voltage_v,         # Pre-transient baseline (start with nominal)
+            'min_v': 0.0,                                  # Minimum voltage seen (filled in later)
+            'max_v': 0.0,                                  # Maximum voltage seen (filled in later)
+            'method': 'FAILED',                            # Will change to 'SCOPE_MEASUREMENTS' if successful
+            'calc_log': []                                 # List of text lines documenting each calculation step
         }
 
+        # Create a shorthand reference to the calculation log list (easier to type)
         calc_log = results['calc_log']
+        # Start the calculation log with a separator border
         calc_log.append("=" * 80)
+        # Add a title line identifying which rail and direction this log covers
         calc_log.append(f"SCOPE HARDWARE MEASUREMENTS: {rail.name} - {direction.value}")
+        # Add the closing separator of the title block
         calc_log.append("=" * 80)
 
         try:
@@ -2746,15 +2774,23 @@ class LoadTransientTest:
         RETURNS:
             A human-readable string explaining status. Can be shown in reports/summaries.
         """
+        # Start with an empty list — we'll add a reason for each parameter that failed
         notes = []
 
+        # Check if the measured droop exceeded the maximum allowed droop for this rail
         if droop > rail.max_droop_mv:
+            # Calculate how much it exceeded the limit (the "by how much" number)
             notes.append(f"Droop exceeds limit by {droop - rail.max_droop_mv:.1f}mV")
+        # Check if the measured recovery time exceeded the maximum allowed recovery time
         if recovery > rail.max_recovery_time_us:
+            # Calculate how much it exceeded the limit in microseconds
             notes.append(f"Recovery exceeds limit by {recovery - rail.max_recovery_time_us:.1f}us")
+        # Check if ringing (oscillation) was detected — ringing is always a failure criterion
         if ringing:
             notes.append("Sustained ringing detected")
 
+        # If any notes were generated, join them with semicolons into one string
+        # If no failures, return a clean "Within specification" message
         return "; ".join(notes) if notes else "Within specification"
 
     def test_single_rail(self, rail: RailConfig) -> RailTestResult:
@@ -2852,56 +2888,81 @@ class LoadTransientTest:
             [PASS] Negative step: PASS (overshoot=28mV, recovery=300µs)
             [FAIL] Overall: FAIL (positive step failed)
         """
+        # Log a separator line to clearly mark the start of this rail's test in the log file
         self._logger.info("=" * 60)
+        # Log the rail name and physical test point so it's easy to trace which rail this is
         self._logger.info(f"TESTING RAIL: {rail.name} ({rail.test_point})")
+        # Log the expected nominal voltage for reference (what we expect to measure)
         self._logger.info(f"  Expected voltage: {rail.expected_voltage_v}V")
+        # Log the two load step descriptions (positive and negative) for this rail
         self._logger.info(f"  Load steps: {rail.load_step_positive} / {rail.load_step_negative}")
+        # Log the pass/fail limits so reviewers can see what the test was checking for
         self._logger.info(f"  Limits: Droop<{rail.max_droop_mv}mV, Recovery<{rail.max_recovery_time_us}us")
+        # Log a closing separator line for the rail header block
         self._logger.info("=" * 60)
 
+        # Create the result container for this rail — starts empty and gets filled in below
         result = RailTestResult(
-            rail_name=rail.name,
-            test_point=rail.test_point
+            rail_name=rail.name,        # Store the rail name (e.g., "3V3") for reports
+            test_point=rail.test_point  # Store where the probe connects (e.g., "TP10") for reports
         )
 
         # Configure oscilloscope using per-rail settings from SCOPE_CONFIG table
+        # If this fails, we cannot take measurements — mark rail as ERROR and return early
         if not self.configure_oscilloscope_for_rail(rail):
+            # Mark as ERROR (not FAIL — equipment problem prevented the test from running)
             result.overall_result = "ERROR"
             return result
 
+        # Configure the electronic load for this rail's current levels
+        # If this fails, we cannot perform the load step — mark as ERROR and return early
         if not self.configure_electronic_load_for_rail(rail):
+            # Mark as ERROR (not FAIL — equipment problem prevented the test from running)
             result.overall_result = "ERROR"
             return result
 
-        # Perform positive load step
+        # Perform positive load step (current increases from low to high)
+        # This tests how the power supply handles a sudden increase in current demand
         self._logger.info("--- POSITIVE LOAD STEP ---")
+        # Call perform_load_step() and store the result in result.positive_step
         result.positive_step = self.perform_load_step(rail, LoadStepDirection.POSITIVE)
 
-        # Small delay between steps
+        # Wait between the two load steps to let the power supply fully settle
+        # Without this delay, residual ringing from the first step could affect the second
         time.sleep(self._timing.get("delay_between_steps_s", 1.0))
 
-        # Perform negative load step
+        # Perform negative load step (current decreases from high to low)
+        # This tests how the power supply handles a sudden decrease in current demand
         self._logger.info("--- NEGATIVE LOAD STEP ---")
+        # Call perform_load_step() and store the result in result.negative_step
         result.negative_step = self.perform_load_step(rail, LoadStepDirection.NEGATIVE)
 
-        # Disable load after testing
+        # Disable the electronic load after testing to stop drawing current from the supply
+        # Wrapped in try/except because we still need to determine pass/fail even if disable fails
         try:
-            self._load.disable_input()
+            self._load.disable_input()  # Turn off the load — stops pulling current
         except:
-            pass
+            pass  # Ignore any errors here — cleanup failure doesn't affect result validity
 
-        # Determine overall result
+        # Determine the overall result based on both load step outcomes
+        # pos_pass: True if the positive (load increase) step produced a PASS result
         pos_pass = result.positive_step and result.positive_step.result == "PASS"
+        # neg_pass: True if the negative (load decrease) step produced a PASS result
         neg_pass = result.negative_step and result.negative_step.result == "PASS"
 
+        # PASS: Only if BOTH the positive and negative steps passed
         if pos_pass and neg_pass:
             result.overall_result = "PASS"
+        # ERROR: If either step is missing (could not be run — equipment issue)
         elif result.positive_step is None or result.negative_step is None:
             result.overall_result = "ERROR"
+        # FAIL: If either step explicitly failed its measurements
         else:
             result.overall_result = "FAIL"
 
+        # Log the final decision for this rail — engineers reviewing the log can trace it here
         self._logger.info(f"Rail {rail.name} overall result: {result.overall_result}")
+        # Return the completed RailTestResult object with both steps and overall result
         return result
 
     def run_test_sequence(self, rails: Optional[List[str]] = None) -> bool:
@@ -3196,106 +3257,176 @@ class LoadTransientTest:
         - Use TEXT for finding specific calculation details (linked files)
         - Use CSV for comparing multiple test runs side-by-side
         """
+        # Generate a timestamp string like "20250122_143052" — used in all file names
+        # so that each test run creates uniquely-named files that never overwrite each other
         timestamp = self.test_start_time.strftime("%Y%m%d_%H%M%S")
 
-        # JSON report
+        # ── JSON REPORT ──────────────────────────────────────────────────────
+        # JSON is a machine-readable format — useful for automated systems and data processing
+        # Build the full file path: reports/load_transient_results_20250122_143052.json
         json_path = self.reports_dir / f"load_transient_results_{timestamp}.json"
+        # Construct the complete data dictionary to be saved as JSON
+        # 'test_info' holds overall test metadata; 'results' holds all rail measurements
         report_data = {
+            # Top-level block: information about the test run itself (not the results)
             'test_info': {
+                # Human-readable test name for identification in automated systems
                 'test_name': 'Load Transient Response Test',
+                # ISO 8601 timestamp of test start (e.g., "2025-01-22T14:30:52")
                 'start_time': self.test_start_time.isoformat(),
+                # ISO 8601 timestamp of test end — None if test didn't complete normally
                 'end_time': self.test_end_time.isoformat() if self.test_end_time else None,
+                # Total seconds the test ran — None if no end time recorded
                 'duration_seconds': (self.test_end_time - self.test_start_time).total_seconds() if self.test_end_time else None
             },
+            # Convert every RailTestResult object to a plain dictionary so JSON can save it
             'results': [r.to_dict() for r in self.results]
         }
 
+        # Open the JSON file for writing and save all the data
         with open(json_path, 'w') as f:
+            # Use NumpyEncoder so numpy numbers (float64, int64, etc.) are saved correctly
             json.dump(report_data, f, indent=2, cls=NumpyEncoder)
 
+        # Record the JSON file location to the log for traceability
         self._logger.info(f"JSON report saved: {json_path}")
+        # Print a short confirmation message to the console for the user
         print(f"  Saved: reports/{json_path.name}")
 
-        # CSV report (droop-focused with trigger values)
+        # ── CSV REPORT ───────────────────────────────────────────────────────
+        # CSV = Comma-Separated Values — opens directly in Microsoft Excel or Google Sheets
+        # Focused on droop and trigger values (the most important measurements per step)
+        # Build the full file path: reports/load_transient_results_20250122_143052.csv
         csv_path = self.reports_dir / f"load_transient_results_{timestamp}.csv"
+        # Open the CSV file for writing (newline='' prevents double blank lines on Windows)
         with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            # Create a CSV writer object that will handle quoting and formatting
             writer = csv.writer(f)
+            # Write the header row — the column titles that appear in row 1 of the spreadsheet
             writer.writerow([
                 'Rail', 'Step', 'Load_Step_mA', 'DV_Droop_or_Rise_mV',
                 'Trigger', 'Result', 'Calculation_File'
             ])
 
+            # Loop through every rail result in our collected results list
             for result in self.results:
+                # Each rail has two steps: positive (load up) and negative (load down)
                 for step in [result.positive_step, result.negative_step]:
+                    # Only write a row if this step actually has data (not None)
                     if step:
+                        # Build the filename of the detailed calculation log for this step
+                        # e.g., "3V3_low_to_high_calculations.txt"
                         calc_file = f"{step.rail_name}_{step.timestamp}_calculations.txt"
+                        # Get this rail's oscilloscope settings (for trigger level)
                         cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                        # Select the right trigger level: "trigger_up" for positive, "trigger_down" for negative
                         if step.step_direction == "POSITIVE":
                             trigger_val = cfg.get("trigger_up", "")
                         else:
                             trigger_val = cfg.get("trigger_down", "")
+                        # Format trigger level as a 3-decimal float string if it's a number, otherwise as-is
                         trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
+                        # Write one data row with all measurements for this step
                         writer.writerow([
-                            result.rail_name,
-                            step.step_direction,
-                            step.load_step_description,
-                            f"{step.droop_mv:.1f}",
-                            trigger_str,
-                            step.result,
-                            f"../calculations/{calc_file}"
+                            result.rail_name,             # e.g., "3V3"
+                            step.step_direction,           # e.g., "POSITIVE" or "NEGATIVE"
+                            step.load_step_description,    # e.g., "100mA -> 800mA"
+                            f"{step.droop_mv:.1f}",        # e.g., "45.2" (voltage change in mV)
+                            trigger_str,                   # e.g., "3.250" (trigger voltage level)
+                            step.result,                   # e.g., "PASS" or "FAIL"
+                            f"../calculations/{calc_file}" # relative path to the detailed calculation file
                         ])
 
+        # Record the CSV file location to the log for traceability
         self._logger.info(f"CSV report saved: {csv_path}")
+        # Print a short confirmation message to the console for the user
         print(f"  Saved: reports/{csv_path.name}")
 
-        # Text summary
+        # ── TEXT SUMMARY REPORT ──────────────────────────────────────────────
+        # Plain text format — human-readable, suitable for printing or forwarding via email
+        # Build the full file path: reports/load_transient_summary_20250122_143052.txt
         summary_path = self.reports_dir / f"load_transient_summary_{timestamp}.txt"
+        # Open the text file for writing (UTF-8 supports special characters like µ and ±)
         with open(summary_path, 'w', encoding='utf-8') as f:
+            # Call _generate_summary_text() to build the formatted summary string, then write it
             f.write(self._generate_summary_text())
 
+        # Record the text summary file location to the log for traceability
         self._logger.info(f"Summary saved: {summary_path}")
+        # Print a short confirmation message to the console for the user
         print(f"  Saved: reports/{summary_path.name}")
 
-        # Generate index of detailed calculation files
+        # ── CALCULATION FILES INDEX (README.txt) ─────────────────────────────
+        # Create an index file in the 'calculations' folder listing all calculation files
+        # This helps reviewers know what files are there and what each one contains
         calc_index_path = self.calculations_dir / "README.txt"
+        # Open README.txt for writing (UTF-8 for special box-drawing characters)
         with open(calc_index_path, 'w', encoding='utf-8') as f:
+            # Write the top border of the index header
             f.write("=" * 80 + "\n")
+            # Write the title of this folder's purpose
             f.write("DETAILED CALCULATION FILES - LOAD TRANSIENT RESPONSE TEST\n")
+            # Write the bottom border of the index header
             f.write("=" * 80 + "\n\n")
+            # Explain what files are in this folder and why they exist
             f.write("This folder contains step-by-step calculation logs for each transient test.\n")
+            # Explain what each file contains in non-technical language
             f.write("Each file shows exactly how droop, recovery time, overshoot, and ringing\n")
+            # Continue explanation of what the files show
             f.write("were calculated from the oscilloscope waveform data.\n\n")
+            # Explain the naming convention so reviewers can find the right file
             f.write("File naming format: <RAIL>_<DIRECTION>_calculations.txt\n")
+            # Give a concrete example of the naming format
             f.write("  Example: 3V3_low_to_high_calculations.txt\n\n")
+            # Write a section separator before the file list
             f.write("=" * 80 + "\n")
+            # Introduce the list of files in this test run
             f.write("FILES IN THIS TEST RUN:\n")
+            # Write another section separator for visual clarity
             f.write("=" * 80 + "\n\n")
 
+            # Loop through every tested rail to list its calculation files
             for result in self.results:
+                # Write the rail name and test point as a section heading
                 f.write(f"RAIL: {result.rail_name} ({result.test_point})\n")
+                # If a positive step (load increase) was tested, list its calculation file
                 if result.positive_step:
                     calc_file = f"{result.positive_step.rail_name}_low_to_high_calculations.txt"
+                    # Write with a tree branch character to show it's part of the rail entry
                     f.write(f"  ├─ LOW→HIGH: {calc_file}\n")
+                    # Write the result (PASS/FAIL) on the next line for quick reference
                     f.write(f"  │  Result: {result.positive_step.result}\n")
+                # If a negative step (load decrease) was tested, list its calculation file
                 if result.negative_step:
                     calc_file = f"{result.negative_step.rail_name}_high_to_low_calculations.txt"
+                    # Write with a closing tree branch character
                     f.write(f"  └─ HIGH→LOW: {calc_file}\n")
+                    # Write the result (PASS/FAIL) on the next line for quick reference
                     f.write(f"     Result: {result.negative_step.result}\n")
+                # Write a blank line between rail entries for readability
                 f.write("\n")
 
+            # Write a closing separator before the instructions section
             f.write("=" * 80 + "\n")
+            # Tell reviewers how to open and read the calculation files
             f.write("To view calculation details, open any file in a text editor.\n")
+            # Introduce the list of what each file contains
             f.write("Each file contains:\n")
+            # List the types of information found in each calculation file
             f.write("  - Waveform data summary\n")
             f.write("  - Baseline voltage calculation\n")
             f.write("  - Droop measurement with actual voltage values\n")
             f.write("  - Overshoot measurement with actual voltage values\n")
             f.write("  - Recovery time calculation showing settlement criteria\n")
             f.write("  - Ringing detection analysis with RMS and peak values\n")
+            # Final item in the list of what each calculation file contains
             f.write("  - Pass/Fail determination for each parameter\n")
+            # Write the final closing border of the README
             f.write("=" * 80 + "\n")
 
+        # Record the README index file location to the log for traceability
         self._logger.info(f"Calculation index saved: {calc_index_path}")
+        # Print a short confirmation message to the console for the user
         print(f"  Saved: calculations/{calc_index_path.name}")
 
     def _generate_summary_text(self) -> str:
@@ -3399,59 +3530,91 @@ class LoadTransientTest:
         Returns the complete summary as a multi-line string that gets written
         to a text file with timestamp (e.g., load_transient_summary_20250311_131136.txt)
         """
+        # Start with an empty list; each element will become one line in the summary text
         lines = []
+        # Add the top separator border (80 "=" characters across the full width)
         lines.append("=" * 80)
+        # Add the title of the report
         lines.append("LOAD TRANSIENT RESPONSE TEST SUMMARY")
+        # Add another separator border beneath the title
         lines.append("=" * 80)
+        # Add the date and time the test started, or "Unknown" if not recorded
         lines.append(f"Test Date: {self.test_start_time.strftime('%Y-%m-%d %H:%M:%S') if self.test_start_time else 'Unknown'}")
 
+        # If we have both start and end times, calculate and display how long the test took
         if self.test_end_time and self.test_start_time:
+            # Subtract start from end to get a timedelta, then convert to seconds
             duration = (self.test_end_time - self.test_start_time).total_seconds()
+            # Add duration line (e.g., "Duration: 245.3 seconds")
             lines.append(f"Duration: {duration:.1f} seconds")
 
+        # Add a blank line for visual spacing
         lines.append("")
 
-        # Count results
+        # ── COUNT HOW MANY RAILS PASSED, FAILED, OR WERE NOT TESTED ─────────
+        # Count the total number of results collected
         total = len(self.results)
+        # Count only results that have a PASS overall result
         passed = sum(1 for r in self.results if r.overall_result == "PASS")
+        # Count only results that have a FAIL overall result
         failed = sum(1 for r in self.results if r.overall_result == "FAIL")
+        # Count only results that were not tested (user skipped or quit before testing)
         not_tested = sum(1 for r in self.results if r.overall_result == "NOT_TESTED")
 
+        # Add overall pass fraction, subtracting not-tested from total to get actual tested count
         lines.append(f"Overall: {passed}/{total - not_tested} PASSED")
+        # If some rails were not tested, mention how many were skipped
         if not_tested > 0:
             lines.append(f"         {not_tested} rails not tested")
+        # Add blank line before the first data table
         lines.append("")
 
-        # ── LOW TO HIGH table ──
+        # ── LOW TO HIGH TABLE (positive step results) ─────────────────────────
+        # Define column widths for the formatted table so everything lines up neatly
         col_w = {"rail": 10, "step": 16, "droop": 16, "recovery": 16, "trigger": 10}
+        # Calculate total width of the table (sum of columns + 9 separator characters)
         table_w = sum(col_w.values()) + 9  # separators
 
+        # Add the table heading for the positive-step (load-increase) section
         lines.append("LOW TO HIGH (Load Up)")
+        # Add a full-width separator line under the heading
         lines.append("=" * table_w)
+        # Add the column header row with rail, load step, droop, recovery time, and trigger labels
         lines.append(
             f" {'Rail':<{col_w['rail']}}| {'Load Step':<{col_w['step']}}| "
             f"{'DV Droop':<{col_w['droop']}}| {'Recovery Time':<{col_w['recovery']}}| "
             f"{'Trigger':<{col_w['trigger']}}"
         )
+        # Add a decorative underline row using underscores to visually separate headers from data
         lines.append(
             f" {'':_<{col_w['rail']}}|{'':_<{col_w['step']+1}}|"
             f"{'':_<{col_w['droop']+1}}|{'':_<{col_w['recovery']+1}}|"
             f"{'':_<{col_w['trigger']+1}}"
         )
+        # Add the units row showing what each column's values are measured in
         lines.append(
             f" {'':>{col_w['rail']}}| {'(mA)':<{col_w['step']}}| "
             f"{'(mV)':<{col_w['droop']}}| {'(µs)':<{col_w['recovery']}}| "
             f"{'':>{col_w['trigger']}}"
         )
+        # Add a thin separator line before the data rows start
         lines.append("-" * table_w)
 
+        # Loop through every rail result to build the LOW→HIGH (positive step) data rows
         for result in self.results:
+            # Only add a row if a positive step was actually tested for this rail
             if result.positive_step:
+                # Shorthand variable for the positive step data
                 step = result.positive_step
+                # Get the oscilloscope scope configuration for this rail (for trigger level)
                 cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                # Look up the "trigger_up" voltage level (used when load increases)
                 trigger_val = cfg.get("trigger_up", "")
+                # Format trigger as a 3-decimal float string, or as plain text if not a number
                 trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
+                # Format recovery time as a string (e.g., "280.5") or blank if None
                 rec_str = f"{step.recovery_time_us:.1f}" if step.recovery_time_us else ""
+                # Build and add the data row for this rail's positive step
                 lines.append(
                     f" {result.rail_name:<{col_w['rail']}}| "
                     f"{step.load_step_description:<{col_w['step']}}| "
@@ -3460,41 +3623,58 @@ class LoadTransientTest:
                     f"{trigger_str:<{col_w['trigger']}}"
                 )
             else:
+                # If the positive step was not run, show "NOT TESTED" in the row
                 lines.append(
                     f" {result.rail_name:<{col_w['rail']}}| {'NOT TESTED':<{col_w['step']}}| "
                     f"{'':<{col_w['droop']}}| {'':<{col_w['recovery']}}| {'':<{col_w['trigger']}}"
                 )
 
+        # Add the closing border of the LOW→HIGH table
         lines.append("=" * table_w)
+        # Add blank line between the two tables for visual separation
         lines.append("")
 
-        # ── HIGH TO LOW table ──
+        # ── HIGH TO LOW TABLE (negative step results) ─────────────────────────
+        # Add the table heading for the negative-step (load-decrease) section
         lines.append("HIGH TO LOW (Load Down)")
+        # Add a full-width separator line under the heading
         lines.append("=" * table_w)
+        # Add the column header row (same structure but "DV Rise" instead of "DV Droop")
         lines.append(
             f" {'Rail':<{col_w['rail']}}| {'Load Step':<{col_w['step']}}| "
             f"{'DV Rise':<{col_w['droop']}}| {'Recovery Time':<{col_w['recovery']}}| "
             f"{'Trigger':<{col_w['trigger']}}"
         )
+        # Add the decorative underline row for the second table
         lines.append(
             f" {'':_<{col_w['rail']}}|{'':_<{col_w['step']+1}}|"
             f"{'':_<{col_w['droop']+1}}|{'':_<{col_w['recovery']+1}}|"
             f"{'':_<{col_w['trigger']+1}}"
         )
+        # Add the units row for the second table
         lines.append(
             f" {'':>{col_w['rail']}}| {'(mA)':<{col_w['step']}}| "
             f"{'(mV)':<{col_w['droop']}}| {'(µs)':<{col_w['recovery']}}| "
             f"{'':>{col_w['trigger']}}"
         )
+        # Add a thin separator line before the data rows
         lines.append("-" * table_w)
 
+        # Loop through every rail result to build the HIGH→LOW (negative step) data rows
         for result in self.results:
+            # Only add a row if a negative step was actually tested for this rail
             if result.negative_step:
+                # Shorthand variable for the negative step data
                 step = result.negative_step
+                # Get the oscilloscope configuration for this rail
                 cfg = self.SCOPE_CONFIG.get(result.rail_name, {})
+                # Look up the "trigger_down" voltage level (used when load decreases)
                 trigger_val = cfg.get("trigger_down", "")
+                # Format trigger as a 3-decimal float string, or as plain text if not a number
                 trigger_str = f"{trigger_val:.3f}" if isinstance(trigger_val, (int, float)) else str(trigger_val)
+                # Format recovery time as a string or blank if not measured
                 rec_str = f"{step.recovery_time_us:.1f}" if step.recovery_time_us else ""
+                # Build and add the data row for this rail's negative step
                 lines.append(
                     f" {result.rail_name:<{col_w['rail']}}| "
                     f"{step.load_step_description:<{col_w['step']}}| "
@@ -3503,89 +3683,137 @@ class LoadTransientTest:
                     f"{trigger_str:<{col_w['trigger']}}"
                 )
             else:
+                # If the negative step was not run, show "NOT TESTED"
                 lines.append(
                     f" {result.rail_name:<{col_w['rail']}}| {'NOT TESTED':<{col_w['step']}}| "
                     f"{'':<{col_w['droop']}}| {'':<{col_w['recovery']}}| {'':<{col_w['trigger']}}"
                 )
 
+        # Add the closing border of the HIGH→LOW table
         lines.append("=" * table_w)
+        # Add blank line after the second table
         lines.append("")
 
-        # Overall assessment
+        # ── OVERALL ASSESSMENT CONCLUSION ──────────────────────────────────────
+        # Determine and add the overall conclusion based on counts of pass/fail/not-tested
         if failed == 0 and not_tested == 0:
+            # All rails tested and all passed — overall test is PASS
             lines.append("OVERALL TEST RESULT: PASS")
             lines.append("All rails meet droop limits.")
         elif failed > 0:
+            # One or more rails failed — overall test is FAIL
             lines.append("OVERALL TEST RESULT: FAIL")
             lines.append(f"{failed} rail(s) failed to meet specifications.")
         else:
+            # No failures but some rails weren't tested — result is INCOMPLETE
             lines.append("OVERALL TEST RESULT: INCOMPLETE")
             lines.append(f"{not_tested} rail(s) were not tested.")
 
+        # Build a lookup dictionary: rail name → RailConfig, for getting limits in failure reasons
         rail_cfg_by_name = {r.name: r for r in self.RAIL_CONFIGS}
 
         def _step_failure_reasons(step: Optional[TransientResult], rail_cfg: Optional[RailConfig]) -> List[str]:
+            """Helper: return a list of text reasons why a step failed, or empty list if passed."""
+            # If no step data exists, call it a missing step error
             if not step:
                 return ["step missing"]
+            # If step passed, there are no failure reasons
             if step.result == "PASS":
                 return []
+            # If there was a measurement error (equipment trouble), report that
             if step.result == "ERROR":
                 return ["measurement error"]
 
+            # Otherwise, check each measured parameter against its limit
             reasons = []
             if rail_cfg:
+                # Check if measured droop exceeded the allowed maximum droop
                 if step.droop_mv and step.droop_mv > rail_cfg.max_droop_mv:
                     reasons.append(f"droop {step.droop_mv:.1f}mV > {rail_cfg.max_droop_mv:.1f}mV")
+                # Check if measured recovery time exceeded the allowed maximum
                 if step.recovery_time_us and step.recovery_time_us > rail_cfg.max_recovery_time_us:
                     reasons.append(f"recovery {step.recovery_time_us:.1f}µs > {rail_cfg.max_recovery_time_us:.1f}µs")
+                # Check if measured overshoot exceeded the allowed maximum
                 if step.overshoot_mv and step.overshoot_mv > rail_cfg.max_overshoot_mv:
                     reasons.append(f"overshoot {step.overshoot_mv:.1f}mV > {rail_cfg.max_overshoot_mv:.1f}mV")
+            # Check if ringing (oscillation) was detected — always a failure criterion
             if step.has_ringing:
                 reasons.append("ringing detected")
+            # If no specific reason was found but it still failed, add a generic "failed" message
             if not reasons:
                 reasons.append("failed")
             return reasons
 
+        # Separate results into three groups: passed, failed, and not-tested rails
         passed_rails = [r for r in self.results if r.overall_result == "PASS"]
         failed_rails = [r for r in self.results if r.overall_result == "FAIL"]
         not_tested_rails = [r for r in self.results if r.overall_result == "NOT_TESTED"]
 
+        # List all rails that passed (celebratory section)
         if passed_rails:
+            # Add blank line for visual spacing before the section
             lines.append("")
+            # Add section heading for passed rails
             lines.append("RAILS PASSED:")
+            # Add one line per passed rail
             for r in passed_rails:
                 lines.append(f"  - {r.rail_name}")
 
+        # List all rails that failed and explain WHY they failed
         if failed_rails:
+            # Add blank line for visual spacing before the section
             lines.append("")
+            # Add section heading for failed rails with hint that reasons follow
             lines.append("RAILS FAILED (reason):")
+            # Loop through each failed rail
             for r in failed_rails:
+                # Get the RailConfig for this rail (contains pass/fail limits)
                 cfg = rail_cfg_by_name.get(r.rail_name)
+                # Get specific reasons the positive step (load increase) failed
                 pos_reasons = _step_failure_reasons(r.positive_step, cfg)
+                # Get specific reasons the negative step (load decrease) failed
                 neg_reasons = _step_failure_reasons(r.negative_step, cfg)
+                # Build a formatted reason string combining both directions
                 reason_parts = []
+                # Include low-to-high direction reasons if any
                 if pos_reasons:
                     reason_parts.append("LOW→HIGH: " + ", ".join(pos_reasons))
+                # Include high-to-low direction reasons if any
                 if neg_reasons:
                     reason_parts.append("HIGH→LOW: " + ", ".join(neg_reasons))
+                # Join direction reasons with " | " separator, or use "failed" if no details
                 reason_str = " | ".join(reason_parts) if reason_parts else "failed"
+                # Add the failed rail entry with reasons
                 lines.append(f"  - {r.rail_name}: {reason_str}")
 
+        # List any rails that were skipped/not tested
         if not_tested_rails:
+            # Add blank line for visual spacing before the section
             lines.append("")
+            # Add section heading for not-tested rails
             lines.append("RAILS NOT TESTED:")
+            # Add one line per not-tested rail
             for r in not_tested_rails:
                 lines.append(f"  - {r.rail_name}")
 
+        # Add the final closing separator line
         lines.append("=" * table_w)
+        # Add blank line before the notes section
         lines.append("")
+        # Add a note explaining what "DV Droop" and "DV Rise" columns mean (for non-engineers)
         lines.append("Note: DV Droop / DV Rise = |ΔY| from scope cursor (Y1=baseline, Y2=Vmin or Vmax)")
+        # Add a note explaining what "Recovery Time" column means
         lines.append("      Recovery Time        =  ΔX from scope cursor (X1=trigger edge, X2=settled point)")
+        # Add blank line before the calculations note
         lines.append("")
+        # Add a heading pointing to the detailed calculation files folder
         lines.append("DETAILED CALCULATION FILES:")
+        # Tell the user where to find the detailed calculation files
         lines.append("  See 'calculations' folder for step-by-step measurement breakdowns.")
+        # Add the final bottom separator
         lines.append("=" * table_w)
 
+        # Join all lines with newline characters and return as a single string ready for writing to file
         return "\n".join(lines)
 
     def _print_summary(self):
@@ -3636,28 +3864,42 @@ class LoadTransientTest:
         - _generate_summary_text(): Creates saveable file (for archives)
         - This method: Console output (for immediate feedback)
         """
-        # Colorize key PASS/FAIL keywords for console readability
+        # Define an inner helper function that adds colour codes to important lines
+        # This runs for each line of the summary text to selectively highlight key words
         def _colorize_line(line: str) -> str:
+            """Apply ANSI colour to PASS/FAIL keywords in a single line for console display."""
+            # If the overall test result is PASS, colour the word PASS in green
             if "OVERALL TEST RESULT: PASS" in line:
                 return line.replace("PASS", _c("PASS", _C_GREEN))
+            # If the overall test result is FAIL, colour the word FAIL in red
             if "OVERALL TEST RESULT: FAIL" in line:
                 return line.replace("FAIL", _c("FAIL", _C_RED))
+            # If the overall test result is INCOMPLETE, colour the word in yellow
             if "OVERALL TEST RESULT: INCOMPLETE" in line:
                 return line.replace("INCOMPLETE", _c("INCOMPLETE", _C_YELLOW))
+            # Colour the "RAILS PASSED:" heading green
             if line.startswith("RAILS PASSED:"):
                 return _c(line, _C_GREEN)
+            # Colour the "RAILS FAILED" heading red
             if line.startswith("RAILS FAILED"):
                 return _c(line, _C_RED)
+            # Colour the "RAILS NOT TESTED:" heading yellow
             if line.startswith("RAILS NOT TESTED:"):
                 return _c(line, _C_YELLOW)
+            # Colour individual rail entries green if that rail passed
             if line.startswith("  - ") and any(r.overall_result == "PASS" for r in self.results if r.rail_name in line):
                 return _c(line, _C_GREEN)
+            # Colour individual rail entries red if that rail failed
             if line.startswith("  - ") and any(r.overall_result == "FAIL" for r in self.results if r.rail_name in line):
                 return _c(line, _C_RED)
+            # Return the line unchanged if it doesn't match any colour rule
             return line
 
+        # Get the complete plain-text summary from _generate_summary_text()
         summary_text = self._generate_summary_text()
+        # Apply colourization to every line and rejoin into one multi-line string
         colorized = "\n".join(_colorize_line(l) for l in summary_text.split("\n"))
+        # Print the colourized summary to the console with a leading blank line for spacing
         print("\n" + colorized)
 
 
@@ -3790,45 +4032,75 @@ def main():
     - LoadTransientTest class (defined above in this file)
     - oscilloscope and electronic load connected to VISA bus
     """
+    # Print the opening banner showing the program name and mode
     print("=" * 70)
+    # Print the program title centred in the banner
     print(" Load Transient Response Test - Auto-Detection Mode")
+    # Print the closing line of the banner
     print("=" * 70)
+    # Print a blank line for visual spacing after the banner
     print()
+    # Inform the user that a better entry point exists with more command-line options
     print("NOTE: For best experience, use run_load_transient_test.py instead")
+    # Explain what additional options the wrapper script provides
     print("      (supports --list, --rails, and other options)")
+    # Print a blank line before instrument detection messages
     print()
 
-    # Allow override from command line (optional)
+    # Start with no addresses — they will either come from command line or be auto-detected
+    # Setting both to None signals the LoadTransientTest constructor to look them up
     scope_addr = None
     load_addr = None
 
+    # If the user passed at least two arguments, use them as the instrument addresses
+    # Usage: python load_transient_response_test.py <scope_address> <load_address>
     if len(sys.argv) >= 3:
+        # First command-line argument is the oscilloscope VISA address
         scope_addr = sys.argv[1]
+        # Second command-line argument is the electronic load VISA address
         load_addr = sys.argv[2]
+        # Confirm to the user which addresses will be used
         print(f"Using addresses from command line:")
+        # Show the oscilloscope address that was provided
         print(f"  Oscilloscope: {scope_addr}")
+        # Show the electronic load address that was provided
         print(f"  Electronic Load: {load_addr}")
     else:
+        # No addresses on command line — the constructor will auto-scan VISA bus
         print("Auto-detecting instruments (pass addresses as arguments to override)...")
 
-    # Create and run test (addresses and output_dir come from load_transient_config.json)
+    # Create a LoadTransientTest instance — this loads config, sets up directories, and auto-detects
+    # Passing None for both addresses means the constructor will look them up from config or scan
     test = LoadTransientTest(
-        oscilloscope_address=scope_addr,
-        electronic_load_address=load_addr,
+        oscilloscope_address=scope_addr,    # None = auto-detect from config or VISA scan
+        electronic_load_address=load_addr,  # None = auto-detect from config or VISA scan
     )
 
-    # Check if instruments were found
+    # After construction, check if instruments were found — both must be present to run the test
     if not test.scope_address or not test.load_address:
+        # Report the error clearly to the user
         print("\nERROR: Required instruments not found!")
+        # Suggest using the list command to see all connected instruments
         print("  Use: python run_load_transient_test.py --list")
+        # Suggest providing addresses manually as an alternative
         print("  Or provide addresses: python load_transient_response_test.py <scope> <load>")
+        # Return error code 1 to the operating system (signals failure)
         return 1
 
-    # Run test sequence (all rails)
+    # Everything looks good — run the complete test sequence for all selected rails
+    # This will prompt the user for rail selection, then run all tests automatically
     success = test.run_test_sequence()
 
+    # Return 0 (success) to the operating system if test ran; 1 if it failed to run
+    # NOTE: 0 = "test framework worked" — actual PASS/FAIL is in the reports
     return 0 if success else 1
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SCRIPT ENTRY GUARD
+# ─────────────────────────────────────────────────────────────────────────────
+# This block only runs when the script is called directly (not when imported)
+# sys.exit() passes the return code from main() to the operating system
 if __name__ == "__main__":
+    # Call main() and pass its return value (0 or 1) to the OS as the exit code
     sys.exit(main())
