@@ -15,6 +15,7 @@ from visa_auto_detect import (   # noqa: F401, F403  (re-export)
     InstrumentInfo,
     VISAAutoDetector,
     detect_all_instruments,
+    show_instrument_status,
     detect_load_transient_instruments,
     detect_input_range_ovp_instruments,
     detect_power_sequencing_instruments,

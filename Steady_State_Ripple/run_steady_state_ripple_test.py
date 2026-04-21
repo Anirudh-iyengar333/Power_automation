@@ -484,6 +484,11 @@ def print_banner():
 # [Blank line for visual separation]
 # Define the main function — this is the central entry point that orchestrates the entire test run
 def main():
+    # Force UTF-8 output so Unicode characters (arrows, tick marks, etc.) print correctly on Windows
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 # Enable ANSI colour codes in the Windows terminal so text formatting works correctly throughout the script
     _enable_ansi()
 
@@ -515,6 +520,13 @@ Examples:
         '--verbose', action='store_true',
         help='Enable verbose instrument-level logging'
     )
+# Register the --headless flag used by the Gradio GUI and CI pipelines to bypass all interactive
+# prompts — output directory comes from the config default, start confirmation is skipped, and
+# results are always saved automatically.
+    parser.add_argument(
+        '--headless', action='store_true',
+        help='Skip all interactive prompts (GUI / CI mode). Auto-saves results.'
+    )
 
 # Parse all the flags the engineer typed and store them in the 'args' object for easy access
     args = parser.parse_args()
@@ -523,6 +535,15 @@ Examples:
 
 # Display the opening banner so the engineer can see the test name and a summary of what it does
     print_banner()
+
+    # Scan the VISA bus and show which required instruments are connected before proceeding
+    try:
+        from visa_auto_detect import show_instrument_status
+        show_instrument_status([
+            ("Oscilloscope", "oscilloscope"),
+        ])
+    except ImportError:
+        pass
 
 # Attempt to import the core test module; if it cannot be found, show a helpful error and stop
     try:
@@ -607,7 +628,12 @@ Examples:
             print(f"  Rails: {[r.name for r in selected_rails]}  (from --rails flag)")
 # Print a blank line after the rail selection summary
         print()
-# If no '--rails' flag was given, show the interactive keyboard menu so the engineer can pick rails visually
+# Headless mode with no '--rails' flag — default to all rails
+    elif args.headless:
+        selected_rails = all_rails
+        print(f"  Headless mode: defaulting to all {len(selected_rails)} rails")
+        print()
+# If no '--rails' flag was given and not headless, show the interactive keyboard menu so the engineer can pick rails visually
     else:
 # Show the interactive checkbox menu and wait for the engineer to select which rails to test
         selected_rails = interactive_rail_selector(all_rails)
@@ -630,7 +656,7 @@ Examples:
 # ── Output directory selection ────────────────────────────────────────────
 # Read the output directory override from the command-line flag (will be None if not provided)
     output_dir = args.output
-# If no output directory was given on the command line, ask the engineer interactively
+# If no output directory was given on the command line, determine the output path
     if output_dir is None:
 # Read the output directory section from the config file
         cfg_out = _CFG.get("output_dir", {})
@@ -640,18 +666,26 @@ Examples:
             if isinstance(cfg_out, dict)
             else str(cfg_out)
         )
+        if args.headless:
+# In headless mode use the config default directly — no interactive prompt
+            output_dir = cfg_dir
+            print(f"  Output directory: {output_dir}")
+            print()
+        else:
 # Show the output directory prompt and return whatever path the engineer chooses
-        output_dir = prompt_output_directory(cfg_dir)
+            output_dir = prompt_output_directory(cfg_dir)
 
 # ── Start confirmation ────────────────────────────────────────────────────
+# In headless mode skip the connection confirmation and proceed directly
+    if not args.headless:
 # Ask the engineer to confirm that hardware setup is complete; allow them to quit at this point if needed
-    response = input("  All setup complete? Press ENTER to start (or 'q' to quit): ").strip().lower()
+        response = input("  All setup complete? Press ENTER to start (or 'q' to quit): ").strip().lower()
 # If the engineer typed q, quit, or exit, cancel the test run cleanly
-    if response in ('q', 'quit', 'exit'):
+        if response in ('q', 'quit', 'exit'):
 # Print a cancellation message
-        print("  Cancelled.")
+            print("  Cancelled.")
 # Return exit code 0 because the engineer deliberately chose to stop, not an error
-        return 0
+            return 0
 
 # ── Run ───────────────────────────────────────────────────────────────────
 # Create a new test instance configured with the selected rails and the chosen output directory
@@ -662,6 +696,11 @@ Examples:
 # ── Save or discard prompt ────────────────────────────────────────────────
 # Print a blank line before the save/discard prompt for visual spacing
     print()
+# In headless mode (GUI / CI) always save results automatically — no prompt
+    if args.headless:
+        print(f"  Results saved: {test._run_dir}")
+        print()
+        return 0 if success else 1
 # Keep asking until the engineer gives a clear yes or no answer about saving the results
     while True:
 # Ask the engineer whether to keep or throw away the results folder; default is Yes if they just press ENTER

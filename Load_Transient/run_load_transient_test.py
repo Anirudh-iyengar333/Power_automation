@@ -294,6 +294,11 @@ def print_banner():
 def main():
     # This is the main entry point — the function that runs when the engineer launches this script from the terminal
     """Main entry point"""
+    # Force UTF-8 output so Unicode characters (arrows, tick marks, etc.) print correctly on Windows
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     # Create an argument parser object that will handle command-line flags passed by the engineer
     parser = argparse.ArgumentParser(
         # Set the description text shown in the help output
@@ -325,6 +330,11 @@ Examples:
     # Add the --output flag; the engineer can specify a custom folder path where all test results and screenshots are saved
     parser.add_argument('--output', type=str, default='load_transient_results',
                         help='Output directory for results')
+    # Add the --headless flag used by the Gradio GUI and CI pipelines to bypass all interactive
+    # prompts — rail selection defaults to all rails, start confirmation is skipped, and results
+    # are always saved automatically.
+    parser.add_argument('--headless', action='store_true',
+                        help='Skip all interactive prompts (GUI / CI mode). Auto-saves results.')
 
     # Parse all command-line arguments provided when the script was launched and store them in 'args'
     args = parser.parse_args()
@@ -339,22 +349,25 @@ Examples:
         # Exit after listing instruments — no test is run
         return 0
 
-    # Store the oscilloscope address from the command-line flag (None if not provided, which triggers auto-detection)
-    scope_addr = args.scope
-    # Store the electronic load address from the command-line flag (None if not provided)
-    load_addr = args.load
-
-    # Inform the engineer how instruments will be found — either from provided addresses or auto-detection
-    if scope_addr and load_addr:
-        # Both addresses were provided, so print them for confirmation
-        print(f"\nUsing specified instruments:")
-        # Print the oscilloscope address
-        print(f"  Oscilloscope:    {scope_addr}")
-        # Print the electronic load address
-        print(f"  Electronic Load: {load_addr}")
-    else:
-        # At least one address is missing, so inform the engineer that auto-detection will be attempted
-        print("\nAuto-detection will be performed during initialization...")
+    # Scan the VISA bus and show which required instruments are connected before proceeding
+    try:
+        from visa_auto_detect import show_instrument_status
+        detected = show_instrument_status([
+            ("Oscilloscope",     "oscilloscope"),
+            ("Electronic Load",  "electronic_load"),
+        ])
+        # If addresses were not supplied via CLI, use the detected ones so detection only runs once
+        if not args.scope and 'oscilloscope' in detected:
+            scope_addr = detected['oscilloscope'].address
+        else:
+            scope_addr = args.scope
+        if not args.load and 'electronic_load' in detected:
+            load_addr = detected['electronic_load'].address
+        else:
+            load_addr = args.load
+    except ImportError:
+        scope_addr = args.scope
+        load_addr  = args.load
 
     # Attempt to import the main test class from the test module file in the same folder
     try:
@@ -378,6 +391,10 @@ Examples:
         rails_to_test = [r.strip() for r in args.rails.split(',')]
         # Print the list of rails to confirm what will be tested
         print(f"\nRails to test: {', '.join(rails_to_test)}")
+    elif args.headless:
+        # Headless mode with no --rails flag — default to all defined rails
+        rails_to_test = [r.name for r in LoadTransientTest.RAIL_CONFIGS]
+        print(f"\nHeadless mode: defaulting to all {len(rails_to_test)} rails")
     else:
         # No rails were specified; show the interactive menu so the engineer can select them
         rails_to_test = interactive_rail_selector(LoadTransientTest.RAIL_CONFIGS)
@@ -455,20 +472,27 @@ Examples:
     # Print a closing divider
     print("-" * 70)
 
-    # Wait for the engineer to confirm all connections are made before starting the test
-    response = input("\nPress ENTER to start the test sequence (or 'q' to quit): ").strip().lower()
-    # Check if the engineer typed 'q', 'quit', or 'exit' to cancel the test
-    if response in ['q', 'quit', 'exit']:
-        # Print a cancellation message
-        print("Test cancelled.")
-        # Return 0 to exit cleanly
-        return 0
+    # In headless mode skip the connection confirmation and proceed directly
+    if not args.headless:
+        # Wait for the engineer to confirm all connections are made before starting the test
+        response = input("\nPress ENTER to start the test sequence (or 'q' to quit): ").strip().lower()
+        # Check if the engineer typed 'q', 'quit', or 'exit' to cancel the test
+        if response in ['q', 'quit', 'exit']:
+            # Print a cancellation message
+            print("Test cancelled.")
+            # Return 0 to exit cleanly
+            return 0
 
     # Run the full test sequence for all selected rails and store the overall pass/fail result
     success = test.run_test_sequence(rails=rails_to_test)
 
     # Print a blank line after the test finishes before the save/discard prompt
     print()
+    # In headless mode (GUI / CI) always save results automatically — no prompt
+    if args.headless:
+        print(f"  Results saved: {test.output_dir}")
+        print()
+        return 0 if success else 1
     # Enter a loop that repeatedly asks the engineer whether to keep or delete the test results
     while True:
         # Ask the engineer whether to save or discard the results

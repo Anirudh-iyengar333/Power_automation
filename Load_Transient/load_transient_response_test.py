@@ -448,7 +448,13 @@ except ImportError as e:  # If something went wrong loading drivers
 # To change rails, trigger levels, timing, etc., edit the JSON — not this file.
 # This ensures the test configuration is separate from the test code.
 
-_CONFIG_PATH = Path(__file__).parent / "load_transient_config.json"  # Path to the JSON config file, sitting next to this script
+# If the DIGANTARA_CONFIG environment variable is set (e.g. by the Gradio GUI launching this
+# module via subprocess), use that path so the correct board config (CPU, SENSOR, IAP, …) is
+# loaded without modifying this file.  If the variable is absent the default CPU config in the
+# same folder is used, so the runner still works when invoked directly from the terminal.
+import os as _os
+_env_cfg = _os.environ.get("DIGANTARA_CONFIG")
+_CONFIG_PATH = (Path(_env_cfg) if _env_cfg else Path(__file__).parent / "CPU_config.json")
 
 def _load_config(path: Path = _CONFIG_PATH) -> dict:
     """
@@ -472,12 +478,12 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
     except FileNotFoundError:
         # Config file is required — tell the user and stop the program
         print(f"ERROR: Config file not found: {path}")
-        print("       This file is required. Copy load_transient_config.json into the Load_Transient folder.")
+        print(f"       This file is required. Copy {_CONFIG_PATH.name} into the Load_Transient folder.")
         sys.exit(1)  # Stop program execution
     except json.JSONDecodeError as e:
         # Config file exists but has a syntax error in the JSON (like a missing comma or bracket)
         print(f"ERROR: Config file has invalid JSON: {e}")
-        print("       Fix load_transient_config.json before running the test.")
+        print(f"       Fix {_CONFIG_PATH.name} before running the test.")
         sys.exit(1)  # Stop program execution
 
 _CFG = _load_config()  # Load the config once at startup; every function below uses _CFG

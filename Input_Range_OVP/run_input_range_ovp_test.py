@@ -422,6 +422,11 @@ def print_banner():
 
 # Define the main function that runs everything in the correct order when the script is launched
 def main():
+    # Force UTF-8 output so Unicode characters (arrows, tick marks, etc.) print correctly on Windows
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     # Enable ANSI colour codes in the terminal so any coloured output renders correctly from the start
     _enable_ansi()
 
@@ -463,6 +468,13 @@ Examples:
         # Help text explaining what this flag does
         help='Enable verbose instrument-level logging'
     )
+    # Register the --headless flag used by the Gradio GUI and CI pipelines to bypass all interactive
+    # prompts — output directory comes from the config default, start confirmation is skipped, and
+    # results are always saved automatically.
+    parser.add_argument(
+        '--headless', action='store_true',
+        help='Skip all interactive prompts (GUI / CI mode). Auto-saves results.'
+    )
 
     # Parse all the flags the engineer typed and store the results in the 'args' object
     args = parser.parse_args()
@@ -471,6 +483,16 @@ Examples:
 
     # Display the big banner at the top of the console so the engineer knows the test script has started
     print_banner()
+
+    # Scan the VISA bus and show which required instruments are connected before proceeding
+    try:
+        from visa_auto_detect import show_instrument_status
+        show_instrument_status([
+            ("Power Supply (PSU)", "power_supply"),
+            ("DMM",                "dmm"),
+        ])
+    except ImportError:
+        pass
 
     # Attempt to import the main test class and related objects from the test module
     try:
@@ -538,15 +560,23 @@ Examples:
         print(f"  Mode: {mode}  (from --mode flag)")
         # Print a blank line after the mode confirmation
         print()
-        # Ask the engineer to confirm that all physical connections are ready before the test begins
-        response = input("  All connections made? Press ENTER to start (or 'q' to quit): ").strip().lower()
-        # If the engineer typed q, quit, or exit, cancel the run gracefully
-        if response in ('q', 'quit', 'exit'):
-            # Tell the engineer the test was cancelled
-            print("  Cancelled.")
-            # Return 0 to signal a clean (non-error) exit
-            return 0
-    # If no --mode flag was given, show the interactive menu so the engineer can choose
+        # In headless mode (GUI / CI) skip the connection confirmation prompt and proceed directly
+        if not args.headless:
+            # Ask the engineer to confirm that all physical connections are ready before the test begins
+            response = input("  All connections made? Press ENTER to start (or 'q' to quit): ").strip().lower()
+            # If the engineer typed q, quit, or exit, cancel the run gracefully
+            if response in ('q', 'quit', 'exit'):
+                # Tell the engineer the test was cancelled
+                print("  Cancelled.")
+                # Return 0 to signal a clean (non-error) exit
+                return 0
+    # If no --mode flag was given, check headless before falling through to the interactive menu
+    elif args.headless:
+        # Headless mode with no --mode flag — default to 'full' so the GUI always has a runnable action
+        mode = 'full'
+        print("  Headless mode: defaulting to --mode full")
+        print()
+    # If no --mode flag was given and not headless, show the interactive menu so the engineer can choose
     else:
         # Display the on-screen menu and wait for the engineer to pick a mode; store the returned choice
         mode = interactive_mode_selector()
@@ -560,20 +590,24 @@ Examples:
     # ── Output directory selection ────────────────────────────────────────────
     # Check if the engineer supplied a results folder path via the --output command-line flag
     output_dir = args.output
-    # If no --output flag was given, ask the engineer interactively where to save results
+    # If no --output flag was given, determine the output path
     if output_dir is None:
-        # Prompt user to select output directory (if not provided via --output flag)
         # Read the output directory setting from the loaded config file
         cfg_output_path = _CFG.get("output_dir", {})
         # Handle the case where 'output_dir' in the config is a dictionary with a 'path' key, or just a plain string
         cfg_output_dir = (
-            # If it is a dictionary, extract the 'path' value; otherwise convert it to a string directly
             cfg_output_path.get("path", "input_range_ovp_results")
             if isinstance(cfg_output_path, dict)
             else str(cfg_output_path)
         )
-        # Show the interactive directory prompt and store the path the engineer confirms or types
-        output_dir = prompt_output_directory(cfg_output_dir)
+        if args.headless:
+            # In headless mode use the config default directly — no interactive prompt
+            output_dir = cfg_output_dir
+            print(f"  Output directory: {output_dir}")
+            print()
+        else:
+            # Show the interactive directory prompt and store the path the engineer confirms or types
+            output_dir = prompt_output_directory(cfg_output_dir)
 
     # ── Create test instance ──────────────────────────────────────────────────
     # Create a new test runner object, telling it which folder to save results into
@@ -650,6 +684,11 @@ Examples:
     # ── Save or discard prompt ────────────────────────────────────────────────
     # Print a blank line before the save/discard prompt for visual separation
     print()
+    # In headless mode (GUI / CI) always save results automatically — no prompt
+    if args.headless:
+        print(f"  Results saved: {test._run_dir}")
+        print()
+        return 0 if success else 1
     # Keep asking until the engineer gives a valid yes or no answer
     while True:
         # Ask the engineer whether to keep the result files, defaulting to yes if they just press Enter

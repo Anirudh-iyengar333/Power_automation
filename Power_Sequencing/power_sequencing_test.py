@@ -90,8 +90,13 @@ from instrument_control.keysight_oscilloscope import KeysightDSOX6004A
 
 # [Blank line for visual separation between sections]
 
-# Build the full file-system path to the configuration file by looking in the same folder as this script — this ensures the config is always found regardless of the current working directory.
-_CONFIG_PATH = Path(__file__).parent / "power_sequencing_config.json"
+# If the DIGANTARA_CONFIG environment variable is set (e.g. by the Gradio GUI launching this
+# module via subprocess), use that path so the correct board config (CPU, SENSOR, IAP, …) is
+# loaded without modifying this file.  If the variable is absent the default CPU config in the
+# same folder is used, so the runner still works when invoked directly from the terminal.
+import os as _os
+_env_cfg = _os.environ.get("DIGANTARA_CONFIG")
+_CONFIG_PATH = Path(_env_cfg) if _env_cfg else Path(__file__).parent / "CPU_config.json"
 
 # [Blank line for visual separation between sections]
 
@@ -119,7 +124,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Tell the operator which file could not be found.
         print(f"ERROR: Config file not found: {path}")
         # Explain that the file is required and that the operator must place it in the correct folder.
-        print("       This file is required. Ensure power_sequencing_config.json is in the same folder.")
+        print(f"       This file is required. Ensure {_CONFIG_PATH.name} is in the same folder.")
         # Stop the program immediately with exit code 1, indicating a fatal error — the test cannot run without this file.
         sys.exit(1)
     # If the file exists but its contents are not valid JSON (e.g. a syntax error in the file), catch that specific error here.
@@ -127,7 +132,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Tell the operator that the JSON in the config file is malformed, and show the specific error detail.
         print(f"ERROR: Config file has invalid JSON: {e}")
         # Instruct the operator to correct the file before trying again.
-        print("       Fix power_sequencing_config.json before running the test.")
+        print(f"       Fix {_CONFIG_PATH.name} before running the test.")
         # Stop the program immediately — a broken config file must be fixed before the test can proceed.
         sys.exit(1)
 

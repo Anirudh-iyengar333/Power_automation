@@ -69,11 +69,16 @@ from instrument_control.keithley_dmm import KeithleyDMM6500
 # [Blank line for visual separation]
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CONFIG LOADING — reads input_range_ovp_config.json once at startup
+# CONFIG LOADING — reads board config once at startup
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Build the full file path to the configuration JSON file, which must be located in the same folder as this script
-_CONFIG_PATH = Path(__file__).parent / "input_range_ovp_config.json"
+# If the DIGANTARA_CONFIG environment variable is set (e.g. by the Gradio GUI launching this
+# module via subprocess), use that path so the correct board config (CPU, SENSOR, IAP, …) is
+# loaded without modifying this file.  If the variable is absent the default CPU config in the
+# same folder is used, so the runner still works when invoked directly from the terminal.
+import os as _os
+_env_cfg = _os.environ.get("DIGANTARA_CONFIG")
+_CONFIG_PATH = Path(_env_cfg) if _env_cfg else Path(__file__).parent / "CPU_config.json"
 
 # [Blank line for visual separation]
 
@@ -99,7 +104,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Print an error message telling the engineer the config file was not found
         print(f"ERROR: Config file not found: {path}")
         # Print a helpful explanation of where the file needs to be placed
-        print("       This file is required. Ensure input_range_ovp_config.json is in the same folder.")
+        print(f"       This file is required. Ensure {_CONFIG_PATH.name} is in the same folder.")
         # Exit the program immediately with error code 1, since the test cannot run without configuration
         sys.exit(1)
     # If the file exists but contains invalid JSON syntax, catch the error and report it clearly
@@ -107,7 +112,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Print an error message showing the specific JSON parsing error
         print(f"ERROR: Config file has invalid JSON: {e}")
         # Tell the engineer to fix the configuration file before running the test again
-        print("       Fix input_range_ovp_config.json before running the test.")
+        print(f"       Fix {_CONFIG_PATH.name} before running the test.")
         # Exit the program immediately with error code 1
         sys.exit(1)
 

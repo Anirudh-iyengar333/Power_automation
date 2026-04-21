@@ -73,8 +73,13 @@ from instrument_control.keysight_oscilloscope import KeysightDSOX6004A
 # CONFIG LOADING — reads steady_state_ripple_config.json once at startup
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Build the full file path to the JSON configuration file by combining this script's directory with the expected config filename — this assumes the config sits in the same folder as this script
-_CONFIG_PATH = Path(__file__).parent / "steady_state_ripple_config.json"
+# If the DIGANTARA_CONFIG environment variable is set (e.g. by the Gradio GUI launching this
+# module via subprocess), use that path so the correct board config (CPU, SENSOR, IAP, …) is
+# loaded without modifying this file.  If the variable is absent the default CPU config in the
+# same folder is used, so the runner still works when invoked directly from the terminal.
+import os as _os
+_env_cfg = _os.environ.get("DIGANTARA_CONFIG")
+_CONFIG_PATH = Path(_env_cfg) if _env_cfg else Path(__file__).parent / "CPU_config.json"
 
 # [Blank line for visual separation between sections]
 
@@ -95,7 +100,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Display a clear error message telling the operator that the required config file is missing
         print(f"ERROR: Config file not found: {path}")
         # Provide additional guidance explaining where the file must be placed
-        print("       steady_state_ripple_config.json is required in the same folder.")
+        print(f"       {_CONFIG_PATH.name} is required in the same folder.")
         # Terminate the program immediately with exit code 1 (indicating failure) because the test cannot run without its configuration
         sys.exit(1)
     # If the file exists but its contents are not valid JSON (e.g., a typo in the file), catch that formatting error here
@@ -103,7 +108,7 @@ def _load_config(path: Path = _CONFIG_PATH) -> dict:
         # Display an error message including the specific JSON syntax problem that was detected
         print(f"ERROR: Config file has invalid JSON: {e}")
         # Instruct the operator to fix the config file before trying again
-        print("       Fix steady_state_ripple_config.json before running the test.")
+        print(f"       Fix {_CONFIG_PATH.name} before running the test.")
         # Terminate the program immediately because invalid configuration would cause unpredictable behaviour during the test
         sys.exit(1)
 

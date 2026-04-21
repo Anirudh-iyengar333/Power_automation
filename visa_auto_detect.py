@@ -92,13 +92,13 @@ class VISAAutoDetector:
                         type_key = inst_info.instrument_type.value
                         if type_key not in instruments:
                             instruments[type_key] = inst_info
-                            print(f"  \u2713 {inst_info}")
+                            print(f"  [FOUND] {inst_info}")
                         else:
                             self._logger.info(f"Additional {type_key} found (using first): {inst_info}")
-                            print(f"  \u2139 {inst_info} (duplicate, using first)")
+                            print(f"  [INFO ] {inst_info} (duplicate, using first)")
                 except Exception as e:
                     self._logger.debug(f"Failed to query {resource}: {e}")
-                    print(f"  \u2717 {resource}: Unable to identify")
+                    print(f"  [SKIP ] {resource}: Unable to identify")
 
             print("-" * 70)
             print(f"\nDetected instruments:")
@@ -186,15 +186,67 @@ class VISAAutoDetector:
         return self._detected_instruments
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Module-level convenience functions
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def detect_all_instruments(verbose: bool = False) -> Dict[str, InstrumentInfo]:
     """Run a full VISA bus scan and return a dict of found instruments."""
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
     return VISAAutoDetector().detect_all_instruments()
+
+
+def show_instrument_status(needed: list) -> Dict[str, InstrumentInfo]:
+    """
+    Scan the VISA bus and print a status table showing which required
+    instruments are detected (READY) and which are missing (NOT FOUND).
+
+    Parameters
+    ----------
+    needed : list of (display_name, type_key) tuples
+        e.g. [("Power Supply (PSU)", "power_supply"), ("DMM", "dmm")]
+
+    Returns
+    -------
+    Dict mapping type_key -> InstrumentInfo for every detected instrument.
+    """
+    WIDTH = 62
+
+    print()
+    print("=" * WIDTH)
+    print("  INSTRUMENT CHECK")
+    print("=" * WIDTH)
+    print(f"  {'Instrument':<26}  {'Detected':<22}  Status")
+    print("-" * WIDTH)
+
+    instruments = detect_all_instruments()
+
+    all_ready = True
+    for display_name, type_key in needed:
+        info = instruments.get(type_key)
+        if info:
+            detected_str = f"{info.manufacturer} {info.model}"
+            # Truncate long names so the table stays aligned
+            if len(detected_str) > 22:
+                detected_str = detected_str[:19] + "..."
+            status = "[READY]"
+        else:
+            detected_str = "---"
+            status = "[NOT FOUND]"
+            all_ready = False
+        print(f"  {display_name:<26}  {detected_str:<22}  {status}")
+
+    print("-" * WIDTH)
+    if all_ready:
+        print("  All required instruments detected.")
+    else:
+        print("  WARNING: Some instruments not found. Check connections,")
+        print("  USB cables, and that instruments are powered on.")
+    print("=" * WIDTH)
+    print()
+
+    return instruments
 
 
 def detect_load_transient_instruments() -> Tuple[Optional[str], Optional[str]]:
@@ -212,13 +264,13 @@ def detect_load_transient_instruments() -> Tuple[Optional[str], Optional[str]]:
     if scope_addr:
         scope_addr = scope_addr.address
     else:
-        print("\n\u26a0 WARNING: Oscilloscope not detected!")
+        print("\nWARNING: Oscilloscope not detected!")
         print("   Supported: Tektronix MSO/DPO/TDS, Keysight DSOX/InfiniiVision")
 
     if load_addr:
         load_addr = load_addr.address
     else:
-        print("\n\u26a0 WARNING: Electronic load not detected!")
+        print("\nWARNING: Electronic load not detected!")
         print("   Supported: Keithley 2380 series")
 
     return scope_addr, load_addr
@@ -240,11 +292,11 @@ def detect_input_range_ovp_instruments() -> Tuple[Optional[str], Optional[str]]:
     dmm_addr = dmm_info.address if dmm_info else None
 
     if not psu_addr:
-        print("\n\u26a0 WARNING: Power supply not detected!")
+        print("\nWARNING: Power supply not detected!")
         print("   Supported: Keithley 2230 / 2280 series")
 
     if not dmm_addr:
-        print("\n\u26a0 WARNING: DMM not detected!")
+        print("\nWARNING: DMM not detected!")
         print("   Supported: Keithley DMM6500 / DMM7510")
 
     return psu_addr, dmm_addr
@@ -266,11 +318,11 @@ def detect_power_sequencing_instruments() -> Tuple[Optional[str], Optional[str]]
     scope_addr = scope_info.address if scope_info else None
 
     if not psu_addr:
-        print("\n\u26a0 WARNING: Power supply not detected!")
+        print("\nWARNING: Power supply not detected!")
         print("   Supported: Keithley 2230 / 2280 series")
 
     if not scope_addr:
-        print("\n\u26a0 WARNING: Oscilloscope not detected!")
+        print("\nWARNING: Oscilloscope not detected!")
         print("   Supported: Tektronix MSO/DPO/TDS, Keysight DSOX/InfiniiVision")
 
     return psu_addr, scope_addr
@@ -289,15 +341,15 @@ def detect_steady_state_ripple_instruments() -> Tuple[Optional[str]]:
     scope_addr  = scope_info.address if scope_info else None
 
     if not scope_addr:
-        print("\n\u26a0 WARNING: Oscilloscope not detected!")
+        print("\nWARNING: Oscilloscope not detected!")
         print("   Supported: Tektronix MSO/DPO/TDS, Keysight DSOX/InfiniiVision")
 
     return (scope_addr,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 # Standalone entry point
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 def main():
     """Run a standalone detection scan and print a full report."""
