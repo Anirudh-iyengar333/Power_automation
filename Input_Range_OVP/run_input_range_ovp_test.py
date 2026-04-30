@@ -621,6 +621,11 @@ Examples:
     if mode == 'fixed':
         # Print a message confirming that only the fixed-voltage tests will be run
         print("\n  Running Fixed Vin tests only.")
+        # For multi-rail configs (SENSOR board) the multi-rail sequence handles everything via run()
+        if test.OUTPUT_RAILS:
+            print("  Multi-rail config detected — running multi-rail sequence.")
+            success = test.run()
+            return 0 if success else 1
         # Try to connect to both instruments; if connection fails, exit immediately with error code 1
         if not test._connect_instruments():
             return 1
@@ -652,6 +657,11 @@ Examples:
     elif mode == 'sweep':
         # Print a message confirming that only the sweep test will be run
         print("\n  Running Sweep test only.")
+        # Multi-rail configs do not have a sweep phase; redirect to the full multi-rail sequence
+        if test.OUTPUT_RAILS:
+            print("  Multi-rail config detected — sweep not applicable, running multi-rail sequence.")
+            success = test.run()
+            return 0 if success else 1
         # Try to connect to both instruments; if connection fails, exit immediately with error code 1
         if not test._connect_instruments():
             return 1

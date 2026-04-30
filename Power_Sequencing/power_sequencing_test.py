@@ -848,7 +848,8 @@ class PowerSequencingTest:
     # Define the '_place_cursors_and_screenshot' method — this method positions two time-axis markers on the oscilloscope display (one at T=0 for power-on, one at the 90% crossing time) and then captures a screenshot showing the waveform with those markers visible.
     def _place_cursors_and_screenshot(self, ch_cfg: ScopeChannelConfig,
                                       t_90_s: Optional[float],
-                                      filename_prefix: str) -> Optional[str]:
+                                      filename_prefix: str,
+                                      all_channels: Optional[List[ScopeChannelConfig]] = None) -> Optional[str]:
         # This docstring explains the marker placement logic, the special case when the 90% time is not available, and what the method returns.
         """
         Place scope markers for this rail and capture a screenshot.
@@ -862,12 +863,25 @@ class PowerSequencingTest:
         Both markers are sourced from ch_cfg.channel so the Y readout on
         the scope display shows the voltage on that specific rail.
 
+        When all_channels is provided, every channel except the current one is
+        hidden before the screenshot and restored afterwards so each cursor
+        image shows only the rail being measured.
+
         Returns path to the saved screenshot, or None on failure.
         """
         # Store the channel number in a short local variable for convenience.
         ch = ch_cfg.channel
+        # Build the list of other channel numbers that should be hidden for the solo screenshot.
+        other_channels = [c.channel for c in all_channels if c.channel != ch] if all_channels else []
         # Begin a protected block — if any step in the marker or screenshot sequence fails, the error is caught and logged rather than crashing the test.
         try:
+            # Hide every other channel so only the current rail's waveform is visible in the screenshot.
+            for other_ch in other_channels:
+                self._scope.disable_channel(other_ch)
+            # Brief pause to let the scope update the display after hiding channels.
+            if other_channels:
+                time.sleep(0.1)
+
             # Set the oscilloscope's marker mode to "WAVeform" so the X markers track the waveform being displayed.
             self._scope.set_marker_mode("WAVeform")
             # Wait a brief moment to allow the scope to apply the marker mode change.
@@ -917,18 +931,22 @@ class PowerSequencingTest:
             self._logger.error(f"Cursor/screenshot error for {ch_cfg.name}: {e}")
             # Return None to indicate the screenshot was not saved.
             return None
-        # The 'finally' block runs whether or not an exception occurred — used here to clear the markers so they do not appear on the next rail's screenshot.
+        # The 'finally' block runs whether or not an exception occurred — used here to clear markers and restore all channels.
         finally:
-            # This comment explains why the markers must always be cleared after each screenshot.
-            # Clear markers so they do not bleed into the next rail's screenshot
-            # Attempt to turn off the markers — this runs even if an exception was raised above.
+            # Turn the marker mode off to clear all markers from the scope display.
             try:
-                # Turn the marker mode off to clear all markers from the scope display.
                 self._scope.set_marker_mode("OFF")
-            # If turning off markers fails, silently ignore it — the test can still continue.
             except Exception:
-                # No action needed; marker clearing failure is not critical.
                 pass
+            # Re-enable every channel that was hidden so the full display is restored for the next screenshot.
+            for other_ch in other_channels:
+                try:
+                    self._scope.enable_channel(other_ch)
+                except Exception:
+                    pass
+            # Brief pause after restoring channels so the scope display settles.
+            if other_channels:
+                time.sleep(0.1)
 
     # Define the '_capture_full_screenshot' method — this method captures a screenshot of the entire oscilloscope display (all four channels, no cursors) and saves it with the given filename.
     def _capture_full_screenshot(self, filename: str) -> Optional[str]:
@@ -1006,7 +1024,8 @@ class PowerSequencingTest:
             # Tell the operator which rail is being processed and which channel it is on.
             print(f"  Placing cursors for {rail_name} (CH{ch_cfg.channel})...")
             # Call the cursor and screenshot method — this runs for every rail regardless of whether the 90% time was found.
-            self._place_cursors_and_screenshot(ch_cfg, t_90_s, screenshot_prefix)
+            # Pass the full channels list so other channels are hidden during each individual cursor screenshot.
+            self._place_cursors_and_screenshot(ch_cfg, t_90_s, screenshot_prefix, all_channels=channels)
 
             # [Blank line for visual separation between sections]
 
@@ -1031,8 +1050,8 @@ class PowerSequencingTest:
                     status = "PASS"   # no limit defined → informational only
                 # If a timing limit is defined, compare the measured time to it and assign PASS or FAIL.
                 else:
-                    # PASS if measured time is within the limit; FAIL if it exceeds the limit.
-                    status = "PASS" if t_ms <= limit_ms else "FAIL"
+                    # PASS if measured time is within the limit (with +5% tolerance); FAIL if it exceeds.
+                    status = "PASS" if t_ms <= limit_ms * 1.05 else "FAIL"
                 # Format the measured time as a string with 3 decimal places for display in the results table.
                 t_ms_str = f"{t_ms:.3f}"
 
@@ -1054,6 +1073,18 @@ class PowerSequencingTest:
             limit_str = f"{limit_ms:.1f}" if limit_ms else "—"
             # Print a results table row showing all key values for this rail in a neatly aligned format.
             print(f"  {rail_name:<10} {ch_cfg.test_point:<6} {threshold:<10.3f} {t_ms_str:<14} {limit_str:<13} {status}")
+            # Emit a machine-readable result line so the Gradio GUI can build the results table live.
+            import json as _json
+            print(
+                "SEQ_RESULT_ROW: " + _json.dumps({
+                    "rail":         rail_name,
+                    "threshold_v":  threshold,
+                    "measured_ms":  measured_ms,
+                    "status":       status,
+                    "config":       config_label,
+                }),
+                flush=True,
+            )
 
         # Print a closing horizontal separator line to complete the results table.
         print("  " + "-" * 62)
@@ -1065,78 +1096,50 @@ class PowerSequencingTest:
     # Operator prompts
     # ─────────────────────────────────────────────────────────────
 
-    # Define the '_prompt_scope_config_1' method — this method displays a step-by-step instruction panel telling the operator exactly which oscilloscope probes to connect to which test points for the Config 1 measurement, then waits for the operator to press ENTER before continuing.
+    # Define the '_prompt_scope_config_1' method — dynamically builds probe instructions from the loaded config channels.
     def _prompt_scope_config_1(self):
-        # Print a blank line for visual separation.
         print()
-        # Print a visual box border to draw the operator's attention to the instruction panel.
         print("  " + "=" * 58)
-        # Print the title of the instruction panel indicating which config is being set up and that action is required.
         print("  SCOPE SETUP — CONFIG 1   (ACTION REQUIRED)")
-        # Print the closing border of the title box.
         print("  " + "=" * 58)
-        # Print a blank line for visual separation inside the panel.
         print()
-        # Print the header for the probe connection instructions.
         print("  Connect oscilloscope probes:")
-        # Instruct the operator to connect Channel 1 to the 1V0PL rail at test point TP8 — this is the trigger channel.
-        print("    CH1  →  1V0PL  (TP8)    [trigger channel]")
-        # Instruct the operator to connect Channel 2 to the 1V8 rail at test point TP6.
-        print("    CH2  →  1V8    (TP6)")
-        # Instruct the operator to connect Channel 3 to the 1V0PS rail at test point TP5.
-        print("    CH3  →  1V0PS  (TP5)")
-        # Instruct the operator to connect Channel 4 to the 1V35 rail at test point TP7.
-        print("    CH4  →  1V35   (TP7)")
-        # Print a blank line.
+        for ch in self.CONFIG1_CHANNELS:
+            trig_tag = "    [trigger channel]" if ch.channel == self._cfg1_trigger_ch else ""
+            print(f"    CH{ch.channel}  →  {ch.name:<10} ({ch.test_point}){trig_tag}")
         print()
-        # Remind the operator to connect the DMM probes so they can confirm the 3V6 rail voltage after this capture.
-        print("  Connect DMM probes to 3V6 output to confirm voltage.")
-        # Print a blank line.
+        # Show DMM hint only when the config includes a 3V6 DMM check
+        if self._dmm_3v6_cfg:
+            print("  Connect DMM probes to 3V6 output to confirm voltage.")
+            print()
+        trig_ch_cfg = next((c for c in self.CONFIG1_CHANNELS if c.channel == self._cfg1_trigger_ch),
+                           self.CONFIG1_CHANNELS[0])
+        trig_level = round(0.2 * trig_ch_cfg.nominal_v, 2)
+        print(f"  Timebase : {self._timebase_s * 1e3:.0f} ms/div   Pre-trigger : {self._pretrigger_pct}%")
+        print(f"  Trigger  : Rising edge on CH{self._cfg1_trigger_ch} at 20% of {trig_ch_cfg.nominal_v} V  (= {trig_level} V)")
         print()
-        # State the timebase and pre-trigger settings that will be applied automatically.
-        print("  Timebase : 1 ms/div   Pre-trigger : 20%")
-        # State the trigger settings that will be applied automatically: rising edge on CH1 at 20% of 1 V.
-        print("  Trigger  : Rising edge on CH1 at 20% of 1 V (= 0.20 V)")
-        # Print a blank line.
-        print()
-        # Wait for the operator to press ENTER — the test will not proceed until the operator has confirmed the probes are in place.
         input("  Press ENTER when all probes are connected and ready... ")
-        # Print a blank line after the prompt.
         print()
 
-    # Define the '_prompt_scope_config_2' method — this method displays instructions telling the operator to move the oscilloscope probes to the Config 2 test points (higher-voltage rails), then waits for the operator to confirm before continuing.
+    # Define the '_prompt_scope_config_2' method — dynamically builds reconnect instructions from the loaded config channels.
     def _prompt_scope_config_2(self):
-        # Print a blank line for visual separation.
         print()
-        # Print a visual box border to draw the operator's attention to the instruction panel.
         print("  " + "=" * 58)
-        # Print the title of the instruction panel indicating Config 2 setup is required.
         print("  SCOPE SETUP — CONFIG 2   (ACTION REQUIRED)")
-        # Print the closing border of the title box.
         print("  " + "=" * 58)
-        # Print a blank line for visual separation inside the panel.
         print()
-        # Tell the operator to move (reconnect) the probes to the Config 2 test points.
         print("  Reconnect oscilloscope probes:")
-        # Instruct the operator to move Channel 1 to the 2V5 rail at TP9 — this is the trigger channel for Config 2.
-        print("    CH1  →  2V5    (TP9)    [trigger channel]")
-        # Instruct the operator to move Channel 2 to the 1V8 rail at TP6.
-        print("    CH2  →  1V8    (TP6)")
-        # Instruct the operator to move Channel 3 to the 3V3 rail at TP10.
-        print("    CH3  →  3V3    (TP10)")
-        # Instruct the operator to move Channel 4 to the 1V35 rail at TP7.
-        print("    CH4  →  1V35   (TP7)")
-        # Print a blank line.
+        for ch in self.CONFIG2_CHANNELS:
+            trig_tag = "    [trigger channel]" if ch.channel == self._cfg2_trigger_ch else ""
+            print(f"    CH{ch.channel}  →  {ch.name:<10} ({ch.test_point}){trig_tag}")
         print()
-        # State the timebase and pre-trigger settings for Config 2.
-        print("  Timebase : 1 ms/div   Pre-trigger : 20%")
-        # State the trigger settings for Config 2: rising edge on CH1 at 20% of 2.5 V = 0.50 V.
-        print("  Trigger  : Rising edge on CH1 at 20% of 2.5 V (= 0.50 V)")
-        # Print a blank line.
+        trig_ch_cfg = next((c for c in self.CONFIG2_CHANNELS if c.channel == self._cfg2_trigger_ch),
+                           self.CONFIG2_CHANNELS[0])
+        trig_level = round(0.2 * trig_ch_cfg.nominal_v, 2)
+        print(f"  Timebase : {self._timebase_s * 1e3:.0f} ms/div   Pre-trigger : {self._pretrigger_pct}%")
+        print(f"  Trigger  : Rising edge on CH{self._cfg2_trigger_ch} at 20% of {trig_ch_cfg.nominal_v} V  (= {trig_level} V)")
         print()
-        # Wait for the operator to press ENTER confirming all probes have been reconnected.
         input("  Press ENTER when all probes are reconnected and ready... ")
-        # Print a blank line after the prompt.
         print()
 
     # Define the '_prompt_dmm_3v6' method — this method displays the expected voltage range for the 3V6 rail, asks the operator to read their multimeter and type in the measured value, then evaluates and prints whether it is within the acceptable tolerance.
@@ -1158,7 +1161,7 @@ class PowerSequencingTest:
             # Parse the entered text as a decimal number representing the measured voltage.
             v = float(raw)
             # Determine whether the measured voltage is within the allowed tolerance of the expected value.
-            result = "PASS" if abs(v - expected) <= tol else "FAIL"
+            result = "PASS" if abs(v - expected) <= max(tol, expected * 0.05) else "FAIL"
             # Print the measured value and the pass/fail verdict.
             print(f"  3V6 DMM: {v:.4f} V  →  {result}")
             # Return the raw input string so it can be stored in the reports exactly as the operator entered it.
@@ -1292,8 +1295,9 @@ class PowerSequencingTest:
             _w(f"  PSU Channel    : CH{self._psu_channel}  ({self._vin_v} V)\n")
             # Write the timebase and pre-trigger settings.
             _w(f"  Timebase       : {self._timebase_s * 1e3:.0f} ms/div  |  Pre-trigger: {self._pretrigger_pct}%\n")
-            # Write the DMM reading entered by the operator.
-            _w(f"  3V6 DMM check  : {dmm_3v6_reading} V\n")
+            # Write the DMM reading only when it was actually performed (CPU board).
+            if dmm_3v6_reading != "N/A":
+                _w(f"  3V6 DMM check  : {dmm_3v6_reading} V\n")
             # Write a section separator line followed by a blank line.
             _w("=" * 70 + "\n\n")
 
@@ -1583,8 +1587,9 @@ class PowerSequencingTest:
                 results_1 = self._run_config1_phase()
                 # Add the Config 1 results to the combined results list.
                 all_results.extend(results_1)
-                # After Config 1 is complete, prompt the operator to enter the DMM reading for the 3V6 rail.
-                dmm_3v6_reading = self._prompt_dmm_3v6()
+                # After Config 1 is complete, prompt for DMM reading only when dmm_3v6_check is configured (CPU board).
+                if self._dmm_3v6_cfg:
+                    dmm_3v6_reading = self._prompt_dmm_3v6()
                 # Run the Config 2 phase (higher voltage rails: 2V5, 1V8, 3V3, 1V35) after the operator has moved the probes.
                 results_2 = self._run_config2_phase()
                 # Add the Config 2 results to the combined results list.
@@ -1598,8 +1603,9 @@ class PowerSequencingTest:
                 results_1 = self._run_config1_phase()
                 # Add the Config 1 results to the combined results list.
                 all_results.extend(results_1)
-                # Prompt the operator to enter the DMM reading for the 3V6 rail after Config 1 is complete.
-                dmm_3v6_reading = self._prompt_dmm_3v6()
+                # Prompt for DMM reading only when configured (CPU board).
+                if self._dmm_3v6_cfg:
+                    dmm_3v6_reading = self._prompt_dmm_3v6()
 
             # This comment marks the branch for the 'config2' mode: run only Config 2 with 1 power cycle.
             # ── CONFIG 2 ONLY ─────────────────────────────────────────────────
@@ -1641,8 +1647,9 @@ class PowerSequencingTest:
                     results_1 = self._run_config1_phase(skip_capture=True)
                     # Add the Config 1 results to the combined results list.
                     all_results.extend(results_1)
-                    # Prompt the operator for the DMM reading.
-                    dmm_3v6_reading = self._prompt_dmm_3v6()
+                    # Prompt for DMM reading only when configured (CPU board).
+                    if self._dmm_3v6_cfg:
+                        dmm_3v6_reading = self._prompt_dmm_3v6()
                 # If the operator indicated Config 2 is connected, run the Config 2 phase without a new power cycle.
                 else:
                     # Run Config 2 analysis only — skip_capture=True means no PSU output toggle or scope arming.

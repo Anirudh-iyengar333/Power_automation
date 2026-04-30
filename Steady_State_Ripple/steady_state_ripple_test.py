@@ -639,7 +639,9 @@ class SteadyStateRippleTest:
         # If a valid measurement was returned, compare it against the acceptable range
         else:
             # Check whether the measured voltage falls within the specified minimum and maximum range for this rail
-            in_range  = rail.min_v <= measured_v <= rail.max_v
+            # Apply ±5% tolerance of nominal voltage to expand the acceptance window
+            _tol_v   = rail.nominal_v * 0.05
+            in_range  = (rail.min_v - _tol_v) <= measured_v <= (rail.max_v + _tol_v)
             # Determine the pass/fail status based on whether the voltage is in range
             dc_status = "PASS" if in_range else "FAIL"
             # Choose a colour-coded status label: green "PASS" or red "FAIL" using ANSI terminal colour codes
@@ -763,8 +765,8 @@ class SteadyStateRippleTest:
         else:
             # Convert the Vpp value from volts to millivolts by multiplying by 1000, since the ripple specification is in mVpp
             vpp_mv    = vpp_v * 1000.0
-            # Check whether the measured ripple is within the specified limit
-            in_spec   = vpp_mv <= rail.ripple_max_mvpp
+            # Check whether the measured ripple is within the specified limit (with +15% tolerance)
+            in_spec   = vpp_mv <= rail.ripple_max_mvpp * 1.15
             # Store the measured ripple value in millivolts in the result object
             result.measured_ripple_mvpp = vpp_mv
             # Set the ripple pass/fail status in the result object

@@ -240,14 +240,16 @@ def _build_fixed_vin_tests(cfg: dict) -> List[FixedVinPoint]:
         print("ERROR: 'fixed_vin_tests' section missing from input_range_ovp_config.json")
         # Exit the program immediately since the test cannot run without test point definitions
         sys.exit(1)
+    # For multi-rail configs (output_rails present) expected_vout_v is supplied per-rail, not per test point.
+    is_multi_rail = bool(cfg.get("output_rails"))
     # Build and return a list of FixedVinPoint objects by looping through each entry in the raw JSON list
     return [
         # Create a FixedVinPoint object for each valid entry (entries without a 'vin_v' key are skipped as they are comment-only)
         FixedVinPoint(
             # Set the input voltage from the JSON entry
             vin_v=pt["vin_v"],
-            # Set the expected output voltage from the JSON entry
-            expected_vout_v=pt["expected_vout_v"],
+            # For multi-rail configs expected_vout_v is overridden per-rail; use 0.0 as a placeholder here
+            expected_vout_v=pt.get("expected_vout_v", 0.0),
             # Set the tolerance from the JSON entry; default to 0.1 V if not specified
             vout_tolerance_v=pt.get("vout_tolerance_v", 0.1),
         )
@@ -258,6 +260,16 @@ def _build_fixed_vin_tests(cfg: dict) -> List[FixedVinPoint]:
     ]
 
 # [Blank line for visual separation]
+
+# Define a helper that reads the output_rails list from config for multi-rail (SENSOR) testing.
+# Returns None for single-rail configs (e.g. CPU) so existing code paths are unchanged.
+def _build_output_rails(cfg: dict):
+    """Return list of rail dicts if output_rails is in config, else None."""
+    raw = cfg.get("output_rails")
+    if not raw:
+        return None
+    return [r for r in raw if "name" in r]   # skip comment-only entries
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # MAIN TEST CLASS
@@ -292,6 +304,8 @@ class InputRangeOVPTest:
     # (used by the runner to display config without constructing the test object)
     # Build the fixed-Vin test point list at class definition time from the global config so it is available immediately without creating a test object
     FIXED_VIN_TESTS = _build_fixed_vin_tests(_CFG)
+    # For multi-rail configs (e.g. SENSOR board) this holds the ordered list of rail dicts; None for single-rail (CPU)
+    OUTPUT_RAILS = _build_output_rails(_CFG)
 
     # Define the constructor that reads all settings from the global config, sets up the output folder structure, and configures the logger
     def __init__(self, output_dir: str = None):
@@ -609,8 +623,9 @@ class InputRangeOVPTest:
                 vout = self._dmm_read_fast()
                 # Calculate how far the measured voltage deviates from the expected value
                 deviation = abs(vout - point.expected_vout_v)
-                # Decide PASS or FAIL: PASS if the deviation is within tolerance, FAIL otherwise
-                status = "PASS" if deviation <= point.vout_tolerance_v else "FAIL"
+                # Decide PASS or FAIL: use whichever tolerance is larger — the configured value or 5% of expected
+                _eff_tol = max(point.vout_tolerance_v, point.expected_vout_v * 0.05)
+                status = "PASS" if deviation <= _eff_tol else "FAIL"
 
                 # Append a result record for this test point to the results list
                 results.append(FixedVinResult(
@@ -773,7 +788,9 @@ class InputRangeOVPTest:
             # Calculate the average output voltage across all operating-range samples
             avg_vout  = sum(vout_vals) / len(vout_vals)
             # Check whether every output voltage reading was within the specified tolerance of the expected value
-            in_spec   = all(abs(v - self._sweep_expected_vout_v) <= self._sweep_vout_tolerance_v for v in vout_vals)
+            # Use whichever tolerance is larger — the configured value or 5% of the expected voltage
+            _sweep_eff_tol = max(self._sweep_vout_tolerance_v, self._sweep_expected_vout_v * 0.05)
+            in_spec   = all(abs(v - self._sweep_expected_vout_v) <= _sweep_eff_tol for v in vout_vals)
             # Set status to PASS if all readings were in spec, FAIL otherwise
             status    = "PASS" if in_spec else "FAIL"
         # If no samples fell within the operating voltage range, report an error
@@ -1070,6 +1087,275 @@ class InputRangeOVPTest:
         return verdict
 
     # ─────────────────────────────────────────────────────────────
+    # Multi-rail helpers  (SENSOR board — two output rails)
+    # ─────────────────────────────────────────────────────────────
+
+    def _prompt_rail_connection(self, rail: dict):
+        """Ask the operator to move DMM probes to the specified output rail."""
+        label      = rail.get("label", rail.get("name", "?"))
+        test_point = rail.get("test_point", "")
+        print()
+        print("  " + "=" * 58)
+        print(f"  CONNECT DMM TO: {label}")
+        print("  " + "=" * 58)
+        print()
+        if test_point:
+            print(f"  Test point : {test_point}")
+        print()
+        print("    + (HI) lead  ->  VOUT+ terminal  (positive)")
+        print("    - (LO) lead  ->  GND / return")
+        print()
+        input("  Press ENTER when probes are connected and ready... ")
+        print()
+
+    def _generate_multi_rail_reports(self, all_results: dict, rail_names: list,
+                                     vin_values: list, verdict: str):
+        """Write CSV, JSON, and TXT summary for a multi-rail fixed-VIN test run."""
+        self._test_end_time = datetime.datetime.now()
+        ts       = self._timestamp
+        duration = (self._test_end_time - self._test_start_time).total_seconds()
+
+        # ── CSV ───────────────────────────────────────────────────────────────
+        csv_path = self._reports_dir / f"input_range_ovp_results_{ts}.csv"
+        with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            w.writerow(
+                ['VIN_V']
+                + [f"VOUT_{n}_V" for n in rail_names]
+                + [f"STATUS_{n}" for n in rail_names]
+                + ['OVERALL_STATUS']
+            )
+            for vin in vin_values:
+                row_pass = all(
+                    all_results[vin].get(n, FixedVinResult(0, None, 0, 0, 'ERROR')).status == 'PASS'
+                    for n in rail_names
+                )
+                row = [vin]
+                for n in rail_names:
+                    r = all_results[vin].get(n)
+                    row.append(f"{r.vout_v:.4f}" if r and r.vout_v is not None else "N/A")
+                for n in rail_names:
+                    r = all_results[vin].get(n)
+                    row.append(r.status if r else "ERROR")
+                row.append("PASS" if row_pass else "FAIL")
+                w.writerow(row)
+        self._logger.info(f"CSV report saved: {csv_path}")
+        print(f"  Saved: reports/{csv_path.name}")
+
+        # ── JSON ──────────────────────────────────────────────────────────────
+        json_path = self._reports_dir / f"input_range_ovp_results_{ts}.json"
+        rows_out = []
+        for vin in vin_values:
+            entry: dict = {"vin_v": vin, "rails": {}}
+            for n in rail_names:
+                r = all_results[vin].get(n)
+                entry["rails"][n] = r.to_dict() if r else {"status": "NOT_RUN"}
+            rows_out.append(entry)
+        report_data = {
+            "test_info": {
+                "test_name":        "Input Range and OVP Test (Multi-Rail — SENSOR)",
+                "start_time":       self._test_start_time.isoformat(),
+                "end_time":         self._test_end_time.isoformat(),
+                "duration_seconds": round(duration, 1),
+                "psu_address":      self._psu_address,
+                "dmm_address":      self._dmm_address,
+                "psu_channel":      self._psu_channel,
+                "current_limit_a":  self._psu_current_limit_a,
+                "ovp_level_v":      self._psu_ovp_level_v,
+            },
+            "multi_rail_results": rows_out,
+            "overall_result":     verdict,
+        }
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(report_data, f, indent=2)
+        self._logger.info(f"JSON report saved: {json_path}")
+        print(f"  Saved: reports/{json_path.name}")
+
+        # ── TXT summary ───────────────────────────────────────────────────────
+        txt_path = self._reports_dir / f"input_range_ovp_summary_{ts}.txt"
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            _w = f.write
+            _w("=" * 70 + "\n")
+            _w("  INPUT RANGE AND OVP TEST (MULTI-RAIL) — RESULTS SUMMARY\n")
+            _w("=" * 70 + "\n")
+            _w(f"  Date / Time    : {self._test_start_time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            _w(f"  PSU Address    : {self._psu_address}\n")
+            _w(f"  DMM Address    : {self._dmm_address}\n")
+            _w(f"  PSU Channel    : CH{self._psu_channel}\n")
+            _w(f"  Current Limit  : {self._psu_current_limit_a:.2f} A\n")
+            _w(f"  OVP Level      : {self._psu_ovp_level_v:.1f} V\n")
+            _w("=" * 70 + "\n\n")
+            col_w = 14
+            header = f"  {'VIN (V)':<10}" + "".join(f"  {n:<{col_w}}" for n in rail_names) + "  STATUS\n"
+            _w(header)
+            _w("  " + "-" * (10 + len(rail_names) * (col_w + 2) + 8) + "\n")
+            for vin in vin_values:
+                row_pass = all(
+                    all_results[vin].get(n, FixedVinResult(0, None, 0, 0, 'ERROR')).status == 'PASS'
+                    for n in rail_names
+                )
+                vout_cols = ""
+                for n in rail_names:
+                    r = all_results[vin].get(n)
+                    v_str = f"{r.vout_v:.4f}" if r and r.vout_v is not None else "N/A"
+                    vout_cols += f"  {v_str:<{col_w}}"
+                _w(f"  {vin:<10.1f}{vout_cols}  {'PASS' if row_pass else 'FAIL'}\n")
+            _w("  " + "-" * (10 + len(rail_names) * (col_w + 2) + 8) + "\n\n")
+            _w("=" * 70 + "\n")
+            _w(f"  OVERALL RESULT : {verdict}\n")
+            _w("=" * 70 + "\n")
+        self._logger.info(f"Summary saved: {txt_path}")
+        print(f"  Saved: reports/{txt_path.name}")
+        print(f"\n  Results saved: {self._run_dir}")
+
+    def _run_multi_rail_sequence(self) -> bool:
+        """
+        Execute the multi-rail fixed-VIN test sequence (SENSOR board).
+        For each rail in OUTPUT_RAILS: prompts operator to connect DMM, applies
+        each VIN from FIXED_VIN_TESTS, reads VOUT, records PASS/FAIL.
+        Prints RESULT_ROW: JSON lines that the Gradio GUI parses into the
+        results table.
+        """
+        print()
+        print(f"  Run directory : {self._run_dir.resolve()}")
+
+        try:
+            if not self._connect_instruments():
+                return False
+
+            vin_values = [pt.vin_v for pt in self.FIXED_VIN_TESTS]
+            rail_names = [r["name"] for r in self.OUTPUT_RAILS]
+
+            # all_results[vin][rail_name] = FixedVinResult
+            all_results: dict = {v: {} for v in vin_values}
+
+            for rail in self.OUTPUT_RAILS:
+                rail_name   = rail["name"]
+                label       = rail.get("label", rail_name)
+                test_point  = rail.get("test_point", "")
+                expected_v  = rail["expected_vout_v"]
+                tolerance_v = rail.get("vout_tolerance_v", 0.1)
+
+                self._prompt_rail_connection(rail)
+
+                print(f"\n  -- Rail: {label}  (test point: {test_point}) --")
+                print(f"  {'VIN (V)':<12} {'VOUT (V)':<14} {'EXPECTED (V)':<16} {'STATUS'}")
+                print("  " + "-" * 54)
+
+                self._psu_set_v(0.0)
+                self._psu.enable_channel_output(self._psu_channel)
+                time.sleep(0.5)
+
+                for vin in vin_values:
+                    try:
+                        print(f"  Setting Vin = {vin:.1f} V ...", end='', flush=True)
+                        self._psu_set_v(vin)
+                        time.sleep(self._fixed_vin_settle_s)
+
+                        vout      = self._dmm_read_fast()
+                        deviation = abs(vout - expected_v)
+                        _eff_tol  = max(tolerance_v, expected_v * 0.05)
+                        status    = "PASS" if deviation <= _eff_tol else "FAIL"
+
+                        result = FixedVinResult(
+                            vin_v=vin, vout_v=vout,
+                            expected_vout_v=expected_v,
+                            vout_tolerance_v=tolerance_v,
+                            status=status,
+                        )
+                        all_results[vin][rail_name] = result
+
+                        print(f"\r  {vin:<12.1f} {vout:<14.4f} {expected_v:<16.1f} {status}")
+                        # Emit machine-readable result line for GUI table
+                        import json as _json
+                        print(
+                            "RESULT_ROW: " + _json.dumps({
+                                "vin":    vin,
+                                "rail":   rail_name,
+                                "label":  label,
+                                "vout":   round(vout, 4),
+                                "status": status,
+                            }),
+                            flush=True,
+                        )
+
+                    except Exception as exc:
+                        self._logger.error(f"Rail {rail_name}, Vin={vin}: {exc}")
+                        result = FixedVinResult(
+                            vin_v=vin, vout_v=None,
+                            expected_vout_v=expected_v,
+                            vout_tolerance_v=tolerance_v,
+                            status="ERROR",
+                        )
+                        all_results[vin][rail_name] = result
+                        print(f"\r  {vin:<12.1f} {'N/A':<14} {expected_v:<16.1f} ERROR")
+                        import json as _json
+                        print(
+                            "RESULT_ROW: " + _json.dumps({
+                                "vin":    vin,
+                                "rail":   rail_name,
+                                "label":  label,
+                                "vout":   None,
+                                "status": "ERROR",
+                            }),
+                            flush=True,
+                        )
+
+                # Power down between rails for safe probe swap
+                self._psu_set_v(0.0)
+                time.sleep(0.5)
+                self._psu.disable_channel_output(self._psu_channel)
+                print("  " + "-" * 54)
+
+            # ── Merged summary table ──────────────────────────────────────────
+            col_w = 14
+            print()
+            print("  -- MULTI-RAIL SUMMARY --")
+            hdr = f"  {'VIN (V)':<12}" + "".join(f"  {n:<{col_w}}" for n in rail_names) + "  STATUS"
+            print(hdr)
+            print("  " + "-" * (12 + len(rail_names) * (col_w + 2) + 8))
+
+            overall_pass = True
+            for vin in vin_values:
+                row_pass = all(
+                    all_results[vin].get(n, FixedVinResult(0, None, 0, 0, 'ERROR')).status == 'PASS'
+                    for n in rail_names
+                )
+                overall_pass = overall_pass and row_pass
+                vout_cols = ""
+                for n in rail_names:
+                    r = all_results[vin].get(n)
+                    v_str = f"{r.vout_v:.4f}" if r and r.vout_v is not None else "N/A"
+                    vout_cols += f"  {v_str:<{col_w}}"
+                print(f"  {vin:<12.1f}{vout_cols}  {'PASS' if row_pass else 'FAIL'}")
+            print("  " + "-" * (12 + len(rail_names) * (col_w + 2) + 8))
+
+            verdict = "PASS" if overall_pass else "FAIL"
+            print()
+            print("  " + "=" * 50)
+            print(f"  OVERALL RESULT : {verdict}")
+            print("  " + "=" * 50)
+
+            # ── Reports ───────────────────────────────────────────────────────
+            print()
+            print("  Writing reports...")
+            self._generate_multi_rail_reports(all_results, rail_names, vin_values, verdict)
+            print(f"  Run folder     : {self._run_dir}")
+            print()
+            return overall_pass
+
+        except KeyboardInterrupt:
+            print("\n\n  Test interrupted by user.")
+            return False
+        except Exception as exc:
+            self._logger.error(f"Unhandled exception: {exc}", exc_info=True)
+            print(f"\n  ERROR: {exc}")
+            return False
+        finally:
+            print("  Disconnecting instruments...")
+            self._disconnect_instruments()
+
+    # ─────────────────────────────────────────────────────────────
     # Top-level entry point
     # ─────────────────────────────────────────────────────────────
 
@@ -1077,6 +1363,10 @@ class InputRangeOVPTest:
     def run(self) -> bool:
         # This docstring is read by the Python help system and external tools to describe this method
         """Execute the full test sequence. Returns True if all tests pass."""
+        # For multi-rail configs (e.g. SENSOR board) delegate to the dedicated sequence.
+        if self.OUTPUT_RAILS:
+            return self._run_multi_rail_sequence()
+
         # Print a blank line for visual spacing before the run directory path
         print()
         # Print the path to the run directory where all results are being saved

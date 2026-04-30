@@ -1,0 +1,134 @@
+{
+    "_description": "Power Sequencing Test Configuration — SENSOR Board",
+    "_objective": "Verify that all SENSOR board power rails ramp in the correct order and reach 90% of their nominal voltage within the specified timing windows after the 5 V input supply is applied.",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "_procedure": {
+        "config_1": "Connect Ch1→3V3 (trigger), Ch2→VDD_IO, Ch3→VDD_PLL, Ch4→VDD. Power on PSU to 5V, capture screenshot, record 90% crossing times. T=0 when 3.3V rail begins rising.",
+        "config_2": "Move probes: Ch1→VAA (trigger), Ch2→VAA_PIX, Ch3→VAA_PIX_BST, Ch4→VDD (reference). Re-run power cycle, capture screenshot. T=0 when VAA begins rising."
+    },
+
+    "instrument_addresses": {
+        "_note": "VISA address strings. scope: null triggers auto-detection.",
+        "psu":   "USB0::0x05E6::0x2230::805224014816710016::INSTR",
+        "scope": "USB0::0x0957::0x1780::MY65220169::INSTR"
+    },
+
+    "output_dir": {
+        "_note": "Base folder for results. A timestamped sub-folder is created automatically for each run.",
+        "path": "power_sequencing_results"
+    },
+
+    "psu_settings": {
+        "_note": "PSU channel and voltage for DUT 5 V input supply.",
+        "channel":             1,
+        "vin_v":               5.0,
+        "current_limit_a":     2.0,
+        "ovp_level_v":         6.0,
+        "timeout_ms":          10000,
+        "pre_poweroff_wait_s": 2.0,
+        "post_poweron_wait_s": 0.5
+    },
+
+    "scope_settings": {
+        "_note": "Shared settings applied to both capture configurations. Trigger fires on the rising edge of Ch1 at 20% of that channel's nominal voltage.",
+        "timebase_s_per_div":    5e-3,
+        "pretrigger_pct":        20,
+        "trigger_slope":         "POS",
+        "sweep_mode":            "NORMal",
+        "coupling":              "DC",
+        "probe_attenuation":     10.0,
+        "bandwidth_limit_20mhz": true,
+        "timeout_ms":            60000,
+        "trigger_wait_s":        15.0
+    },
+
+    "scope_config_1": {
+        "_note": "Digital rails capture. Ch1 (3V3) is the trigger reference — T=0 is when 3.3V begins rising.",
+        "trigger_channel": 1,
+        "channels": {
+            "1": {
+                "name":       "3V3",
+                "test_point": "3V3",
+                "nominal_v":  3.3,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "3.3V buck output. Trigger channel — scope triggers on its rising edge."
+            },
+            "2": {
+                "name":       "VDD_IO",
+                "test_point": "VDD_IO",
+                "nominal_v":  1.8,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "1.8V LDO output supplying SENSOR IO rails."
+            },
+            "3": {
+                "name":       "VDD_PLL",
+                "test_point": "VDD_PLL",
+                "nominal_v":  2.8,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "2.8V low-noise LDO supplying XGS45K PLL."
+            },
+            "4": {
+                "name":       "VDD",
+                "test_point": "VDD",
+                "nominal_v":  1.2,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "1.2V digital core supply (XGS45K VDD)."
+            }
+        }
+    },
+
+    "scope_config_2": {
+        "_note": "Analog rails capture. Ch1 (VAA) is the trigger reference — T=0 is when VAA begins rising.",
+        "trigger_channel": 1,
+        "channels": {
+            "1": {
+                "name":       "VAA",
+                "test_point": "VAA",
+                "nominal_v":  2.8,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "2.8V low-noise LDO supplying XGS45K analog supply. Trigger channel."
+            },
+            "2": {
+                "name":       "VAA_PIX",
+                "test_point": "VAA_PIX",
+                "nominal_v":  3.0,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "3.0V low-noise LDO supplying XGS45K pixel array."
+            },
+            "3": {
+                "name":       "VAA_PIX_BST",
+                "test_point": "VAA_PIX_BST",
+                "nominal_v":  3.0,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "3.0V low-noise LDO supplying pixel array boost rail."
+            },
+            "4": {
+                "name":       "VDD",
+                "test_point": "VDD",
+                "nominal_v":  1.2,
+                "v_scale":    1,
+                "v_offset":   2,
+                "_note":      "1.2V digital core supply (VDD) — included as a reference between captures."
+            }
+        }
+    },
+
+    "rail_timing_limits": {
+        "_note": "Maximum allowed time (ms) for each rail to reach 90% of nominal. T=0 is defined per-capture-config (see scope_config_1 and scope_config_2 trigger_channel notes). Adjust limits after first test run to reflect actual hardware sequencing.",
+        "3V3":         {"max_time_ms": 5.0,  "_note": "Trigger reference rail for Config 1. Must be the fastest."},
+        "VDD_IO":      {"max_time_ms": 15.0, "_note": "LDO output enabled after 3.3V rises. Measured from 3.3V T=0."},
+        "VDD_PLL":     {"max_time_ms": 15.0, "_note": "LDO output enabled after 3.6V rises. Measured from 3.3V T=0."},
+        "VDD":         {"max_time_ms": 20.0, "_note": "LDO output. Appears in both configs — limit applies in each."},
+        "VAA":         {"max_time_ms": 5.0,  "_note": "Trigger reference rail for Config 2. T=0 reference for this capture."},
+        "VAA_PIX":     {"max_time_ms": 15.0, "_note": "LDO enabled after VAA rises. Measured from VAA T=0."},
+        "VAA_PIX_BST": {"max_time_ms": 15.0, "_note": "LDO enabled after VAA rises. Measured from VAA T=0."}
+    }
+}

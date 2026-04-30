@@ -42,103 +42,103 @@
     "rails": [
         {
             "name":            "5V_Input",
-            "test_point":      "J2 / PSU",
+            "test_point":      "5V_IN",
             "nominal_v":       5.0,
             "min_v":           4.75,
             "max_v":           5.25,
             "dc_v_scale":      1.0,
             "ripple_max_mvpp": 50.0,
-            "_note":           "Input supply rail. Probe at J2 PSU connector on GSE board."
+            "_note":           "Input supply rail. Probe at PSU input to board."
         },
         {
             "name":            "3V3",
-            "test_point":      "C11 / U2 OUT",
+            "test_point":      "3V3",
             "nominal_v":       3.3,
             "min_v":           3.20,
             "max_v":           3.40,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 30.0,
-            "_note":           "Buck regulator output (U2). Probe output capacitor C11."
+            "_note":           "3.3V buck output."
         },
         {
             "name":            "3V6",
-            "test_point":      "C17 / U1 OUT",
+            "test_point":      "3V6",
             "nominal_v":       3.6,
             "min_v":           3.50,
             "max_v":           3.70,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 30.0,
-            "_note":           "Buck regulator output (U1). Probe output capacitor C17."
+            "_note":           "3.6V buck output."
         },
         {
             "name":            "VDD_IO",
-            "test_point":      "C168 / U7 OUT",
+            "test_point":      "VDD_IO",
             "nominal_v":       1.8,
             "min_v":           1.73,
             "max_v":           1.87,
             "dc_v_scale":      0.2,
             "ripple_max_mvpp": 20.0,
-            "_note":           "LDO output (U7) supplying SENSOR IO rails. Probe C168. Use short ground spring on probe tip."
+            "_note":           "1.8V LDO output supplying SENSOR IO rails. Use short ground spring on probe tip."
         },
         {
             "name":            "VDD_PLL",
-            "test_point":      "C23 / U3 OUT",
+            "test_point":      "VDD_PLL",
             "nominal_v":       2.8,
             "min_v":           2.73,
             "max_v":           2.87,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 5.0,
-            "_note":           "Low-noise LDO (U3 TPS7A9401DSC) supplying XGS45K PLL. Tight 5 mV ripple spec. Probe C23. Use ground spring — any loop inductance degrades measurement."
+            "_note":           "2.8V low-noise LDO supplying XGS45K PLL. Tight 5 mV ripple spec. Use ground spring — any loop inductance degrades measurement."
         },
         {
             "name":            "VAA",
-            "test_point":      "C45 / U6 OUT",
+            "test_point":      "VAA",
             "nominal_v":       2.8,
             "min_v":           2.74,
             "max_v":           2.86,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 5.0,
-            "_note":           "Low-noise LDO (U6 TPS7A9401DSC) supplying XGS45K analog supply (VAA). Probe C45. ±2 % accuracy range used for DC band."
+            "_note":           "2.8V low-noise LDO supplying XGS45K analog supply. ±2 % accuracy range used for DC band."
         },
         {
             "name":            "VAA_PIX",
-            "test_point":      "C36 / U4 OUT",
+            "test_point":      "VAA_PIX",
             "nominal_v":       3.0,
             "min_v":           2.93,
             "max_v":           3.08,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 5.0,
-            "_note":           "Low-noise LDO (U4 TPS7A9401DSC) supplying XGS45K pixel array supply (VAA_PIX). Probe C36. Critical rail — any excess noise directly affects pixel dark current."
+            "_note":           "3.0V low-noise LDO supplying XGS45K pixel array. Critical rail — any excess noise directly affects pixel dark current."
         },
         {
             "name":            "VAA_PIX_BST",
-            "test_point":      "C52 / U5 OUT",
+            "test_point":      "VAA_PIX_BST",
             "nominal_v":       3.0,
             "min_v":           2.93,
             "max_v":           3.08,
             "dc_v_scale":      0.5,
             "ripple_max_mvpp": 5.0,
-            "_note":           "Low-noise LDO (U5 TPS7A9401DSC) supplying pixel array boost rail (VAA_PIX_BST). Probe C52."
+            "_note":           "3.0V low-noise LDO supplying pixel array boost rail."
         },
         {
             "name":            "VDD",
-            "test_point":      "C177 / U8 OUT",
+            "test_point":      "VDD",
             "nominal_v":       1.2,
             "min_v":           1.164,
             "max_v":           1.236,
             "dc_v_scale":      0.2,
             "ripple_max_mvpp": null,
-            "_note":           "XGS45K core supply (U8 LDO), regulator side. Probe output capacitor C177. Ripple spec TBD — update ripple_max_mvpp once datasheet limit is confirmed. ±3 % voltage band used for DC check."
+            "_note":           "1.2V digital core supply. Ripple spec TBD — update ripple_max_mvpp once confirmed. ±3 % voltage band used for DC check."
         },
         {
             "name":            "VDD_SNS",
-            "test_point":      "R31 / Sensor side",
+            "test_point":      "VDD_SNS",
             "nominal_v":       1.2,
             "min_v":           1.164,
             "max_v":           1.236,
             "dc_v_scale":      0.2,
             "ripple_max_mvpp": null,
-            "_note":           "XGS45K core supply measured AFTER the 4 mΩ sense resistor R31 (sensor-side pad). Compare with VDD reading — voltage drop across R31 confirms feedback sense trace is correct. Ripple spec TBD."
+            "_note":           "1.2V core supply measured on sensor side of current-sense resistor. Compare with VDD — voltage drop confirms sense trace is correct. Ripple spec TBD."
         }
     ]
 }

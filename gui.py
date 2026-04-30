@@ -261,27 +261,30 @@ def _instrument_info_html(board: str, suite: str) -> str:
     if not addrs:  # ← If no instruments listed
         return ""  # ← Return empty string
 
-    items = []  # ← List to accumulate HTML <li> items
-    for key in addrs:  # ← Loop through each instrument key
-        if key.startswith("_"):  # ← Skip private/internal keys (starting with _)
-            continue  # ← Move to next key
-        
-        label = _INSTR_LABELS.get(key, key.replace("_", " ").title())  # ← Get human-readable label, or auto-format
-        items.append(  # ← Add this instrument to the list
-            f"<li style='padding:2px 0'>{label}</li>"  # ← Create HTML list item with styling
-        )
+    labels = []  # ← List of human-readable instrument names
+    for key in addrs:
+        if key.startswith("_"):
+            continue
+        labels.append(_INSTR_LABELS.get(key, key.replace("_", " ").title()))
 
-    if not items:  # ← If no items were added
-        return ""  # ← Return empty string
+    if not labels:
+        return ""
 
-    # ← Return complete HTML widget showing required instruments
+    rows_html = "".join(
+        f"<div style='display:flex;align-items:center;gap:7px;padding:3px 0;"
+        f"color:#475569;font-size:0.83em;'>"
+        f"<span style='width:4px;height:4px;border-radius:50%;"
+        f"background:#1e40af;display:inline-block;flex-shrink:0;'></span>"
+        f"{_html.escape(lbl)}</div>"
+        for lbl in labels
+    )
     return (
-        "<div style='background:#1e2a3a;border:0px solid #2d4a6e;border-radius:6px;"  # ← Outer container with dark blue background
-        "padding:10px 14px;margin-top:4px;font-size:0.85em'>"  # ← Padding, margin, and font size
-        "<div style='color:#4fc3f7;font-weight:600;margin-bottom:6px'>Instruments Required</div>"  # ← Title in cyan blue
-        "<ul style='margin:0;padding-left:18px;color:#d4d4d4'>"  # ← Unordered list styling
-        + "".join(items)  # ← Join all instrument items into one string
-        + "</ul></div>"  # ← Close list and container
+        f"<div style='background:#0f172a;border:1px solid #1e293b;"
+        f"border-left:2px solid #1d4ed8;border-radius:6px;"
+        f"padding:8px 12px;margin-top:8px;'>"
+        f"<div style='color:#334155;font-size:0.63em;font-weight:700;"
+        f"text-transform:uppercase;letter-spacing:2px;margin-bottom:7px;'>Instruments</div>"
+        f"{rows_html}</div>"
     )
 
 
@@ -289,12 +292,17 @@ def _instrument_info_html(board: str, suite: str) -> str:
 # ↓ BELOW: Converts test output lines to styled HTML that auto-scrolls to bottom
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ← CSS styling for the log display area (height, colors, fonts, scrolling)
 _LOG_STYLE = (
-    "height:500px;overflow-y:auto;background:#1e1e1e;color:#d4d4d4;"  # ← Set height, enable vertical scroll, dark background, light text
-    "font-family:'Consolas','Courier New',monospace;font-size:0.84em;"  # ← Use monospace font for code display
-    "padding:12px;white-space:pre-wrap;border:1px solid #555;"  # ← Add padding, preserve whitespace, add border
-    "border-radius:6px;line-height:1.45;"  # ← Round corners, set line spacing
+    "height:460px;overflow-y:auto;"
+    "background:#0a0f1e;"
+    "color:#8892a4;"
+    "font-family:ui-monospace,'Cascadia Code','Fira Code','Consolas',monospace;"
+    "font-size:0.82em;"
+    "padding:14px 16px;"
+    "white-space:pre-wrap;"
+    "border:1px solid #1a2035;"
+    "border-radius:6px;"
+    "line-height:1.65;"
 )
 
 # ← JavaScript snippet that auto-scrolls the log to the bottom when content updates
@@ -351,31 +359,39 @@ def _build_cmd(suite: str, mode: str | None, rails: list[str] | None,
 # ↓ BELOW: Main test launcher - spawns subprocess and streams output in real-time
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _results_html(log_lines: list[str]) -> str:
+    """Combine multi-rail (RESULT_ROW) and power-sequencing (SEQ_RESULT_ROW) tables into one HTML block."""
+    parts = []
+    multi_rows = _parse_result_rows(log_lines)
+    if multi_rows:
+        parts.append(_build_results_table_html(multi_rows))
+    seq_rows = _parse_seq_result_rows(log_lines)
+    if seq_rows:
+        parts.append(_build_seq_results_table_html(seq_rows))
+    return "".join(parts)
+
+
 def launch_test(board, suite, mode, rails, output_dir):
     """
-    Generator → yields (log_html, status, save_row_update) on every new line.
+    Generator → yields (log_html, status, save_row_update, results_html) on every new line.
     stdin is piped so the user can unblock in-test prompts via the Send button.
     """
     global _active_proc, _last_run_dir  # ← Declare as global so we can modify them
 
     # ← Validate that user has selected both board and test suite
-    if not board or not suite:  # ← Check if board or suite is empty
-        yield _log_html([], "Select a board and suite first."), "Error", gr.update(visible=False)  # ← Show error and exit
-        return  # ← Stop execution
+    if not board or not suite:
+        yield _log_html([], "Select a board and suite first."), _status_html("Error"), gr.update(visible=False), ""
+        return
 
-    # ← Get the config file for this board+suite combination
-    cfg_path = get_config_path(board, suite)  # ← Look up config file path
-    if cfg_path is None:  # ← If config doesn't exist
-        yield (_log_html([], f"No config for {board} / {suite}."),  # ← Show error message with details
-               "Error", gr.update(visible=False))  # ← Set status to Error
-        return  # ← Stop execution
+    cfg_path = get_config_path(board, suite)
+    if cfg_path is None:
+        yield _log_html([], f"No config for {board} / {suite}."), _status_html("Error"), gr.update(visible=False), ""
+        return
 
-    # ← Check if another test is already running
-    with _proc_lock:  # ← Acquire lock for thread safety
-        if _active_proc is not None and _active_proc.poll() is None:  # ← If process exists and is still running
-            yield (_log_html([], "A test is already running — click Stop first."),  # ← Show error message
-                   "Running", gr.update(visible=False))  # ← Status stays "Running"
-            return  # ← Stop execution
+    with _proc_lock:
+        if _active_proc is not None and _active_proc.poll() is None:
+            yield _log_html([], "A test is already running — click Stop first."), _status_html("Running"), gr.update(visible=False), ""
+            return
 
     # ← Build the command-line arguments for the test script
     cmd = _build_cmd(suite, mode, rails, output_dir)  # ← Get command list
@@ -390,7 +406,7 @@ def launch_test(board, suite, mode, rails, output_dir):
         f"Command    : {' '.join(cmd[2:])}\n",  # ← Show the command being run (skip python exe and path)
         "─" * 60 + "\n",  # ← Draw a line separator
     ]
-    yield _log_html(header), "Running", gr.update(visible=False)  # ← Display header and set status to Running
+    yield _log_html(header), _status_html("Running"), gr.update(visible=False), ""
 
     # ← Spawn the test process
     try:  # ← Wrap in try-except to catch subprocess errors
@@ -405,7 +421,7 @@ def launch_test(board, suite, mode, rails, output_dir):
                 env=env, cwd=str(ROOT),  # ← Set environment and working directory
             )
     except Exception as exc:  # ← If subprocess launch fails
-        yield _log_html(header + [f"\nFailed to launch: {exc}\n"]), "Error", gr.update(visible=False)  # ← Show error
+        yield _log_html(header + [f"\nFailed to launch: {exc}\n"]), _status_html("Error"), gr.update(visible=False), ""
         return  # ← Stop execution
 
     # ← Read output from the test process line-by-line
@@ -418,7 +434,7 @@ def launch_test(board, suite, mode, rails, output_dir):
         if m:  # ← If pattern found
             p = Path(m.group(1).strip())  # ← Extract path from the match
             _last_run_dir = p if p.is_absolute() else ROOT / p  # ← Store path (absolute or relative to ROOT)
-        yield _log_html(log_lines), "Running", gr.update(visible=False)  # ← Update display with new line
+        yield _log_html(log_lines), _status_html("Running"), gr.update(visible=False), _results_html(log_lines)
 
     # ← Wait for process to complete and check exit code
     _active_proc.wait()  # ← Wait for process to finish
@@ -436,7 +452,7 @@ def launch_test(board, suite, mode, rails, output_dir):
             "Choose below whether to keep or delete the results.\n",  # ← Instructions
         ]
 
-    yield _log_html(log_lines), status, gr.update(visible=show_save)  # ← Final yield with status and buttons visibility
+    yield _log_html(log_lines), _status_html(status), gr.update(visible=show_save), _results_html(log_lines)
 
     # ← Clean up: mark process as None so a new test can run
     with _proc_lock:  # ← Acquire lock for thread safety
@@ -551,22 +567,393 @@ def browse_output_dir(current: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ↓ BELOW: Results table parsing and rendering (for multi-rail SENSOR tests)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_result_rows(lines: list[str]) -> dict:
+    """
+    Scan log lines for 'RESULT_ROW: <json>' markers emitted by the multi-rail
+    test sequence.  Returns:
+        { vin_str: { rail_name: {"label": str, "vout": float|None, "status": str} } }
+    """
+    rows: dict = {}
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("RESULT_ROW:"):
+            continue
+        try:
+            data = json.loads(line[len("RESULT_ROW:"):].strip())
+        except Exception:
+            continue
+        vin  = str(data.get("vin", "?"))
+        rail = data.get("rail", "?")
+        if vin not in rows:
+            rows[vin] = {}
+        rows[vin][rail] = {
+            "label":  data.get("label", rail),
+            "vout":   data.get("vout"),   # float or None
+            "status": data.get("status", "?"),
+        }
+    return rows
+
+
+# ← Styling constants for the results table
+_TBL_WRAP  = (
+    "margin-top:14px;overflow-x:auto;"
+)
+_TBL_TITLE = (
+    "color:#4fc3f7;font-weight:600;margin-bottom:8px;font-size:0.9em;"
+    "font-family:'Consolas','Courier New',monospace;"
+)
+_TBL_CSS   = (
+    "border-collapse:collapse;width:100%;"
+    "font-family:'Consolas','Courier New',monospace;font-size:0.85em;"
+    "background:#1e1e1e;color:#d4d4d4;"
+)
+_TH_CSS    = (
+    "background:#2a3a4a;color:#4fc3f7;padding:8px 14px;"
+    "text-align:left;border:1px solid #3a5a7a;font-weight:600;"
+)
+_TD_CSS    = "padding:7px 14px;border:1px solid #383838;"
+_PASS_CSS  = "color:#4caf50;font-weight:bold;"
+_FAIL_CSS  = "color:#f44336;font-weight:bold;"
+_ERR_CSS   = "color:#ff9800;font-weight:bold;"
+
+
+def _parse_seq_result_rows(lines: list[str]) -> list[dict]:
+    """
+    Scan log lines for 'SEQ_RESULT_ROW: <json>' markers emitted by the power-
+    sequencing test.  Returns a list of dicts in emission order:
+        [{"rail": str, "threshold_v": float, "measured_ms": float|None,
+          "status": str, "config": str}, ...]
+    """
+    rows = []
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("SEQ_RESULT_ROW:"):
+            continue
+        try:
+            data = json.loads(line[len("SEQ_RESULT_ROW:"):].strip())
+            rows.append(data)
+        except Exception:
+            continue
+    return rows
+
+
+def _build_seq_results_table_html(rows: list[dict]) -> str:
+    """
+    Build an HTML table for power-sequencing results.
+    Columns: Rail | 90% Voltage | Measured Time (ms) | Pass/Fail
+    Rows are grouped under their Config label.
+    """
+    if not rows:
+        return ""
+
+    # Group rows by config label, preserving order
+    configs: dict[str, list[dict]] = {}
+    for r in rows:
+        cfg = r.get("config", "")
+        configs.setdefault(cfg, []).append(r)
+
+    th_base = f"background:#2a3a4a;color:#4fc3f7;padding:8px 14px;text-align:left;border:1px solid #3a5a7a;font-weight:600;"
+    td_base = f"padding:7px 14px;border:1px solid #383838;"
+    cfg_hdr = f"background:#1a2a3a;color:#81c995;padding:6px 14px;border:1px solid #3a5a7a;font-style:italic;font-size:0.83em;"
+
+    headers = ["Rail", "90% Voltage", "Measured Time (ms)", "Pass/Fail"]
+    th_row  = "".join(f"<th style='{th_base}'>{h}</th>" for h in headers)
+    thead   = f"<thead><tr>{th_row}</tr></thead>"
+
+    tbody_parts = []
+    for cfg_label, cfg_rows in configs.items():
+        if cfg_label:
+            tbody_parts.append(
+                f"<tr><td colspan='4' style='{cfg_hdr}'>{cfg_label}</td></tr>"
+            )
+        for r in cfg_rows:
+            rail    = r.get("rail", "?")
+            thr_v   = r.get("threshold_v")
+            meas_ms = r.get("measured_ms")
+            status  = r.get("status", "?")
+
+            thr_str  = f"{thr_v:.3f} V" if thr_v is not None else "—"
+            meas_str = f"{meas_ms:.3f}" if meas_ms is not None else "N/A"
+
+            if status == "PASS":
+                s_css = "color:#4caf50;font-weight:bold;"
+            elif status == "FAIL":
+                s_css = "color:#f44336;font-weight:bold;"
+            else:
+                s_css = "color:#ff9800;font-weight:bold;"
+
+            cells = (
+                f"<td style='{td_base}'>{rail}</td>"
+                f"<td style='{td_base}'>{thr_str}</td>"
+                f"<td style='{td_base}'>{meas_str}</td>"
+                f"<td style='{td_base}{s_css}'>{status}</td>"
+            )
+            tbody_parts.append(f"<tr>{cells}</tr>")
+
+    tbody = f"<tbody>{''.join(tbody_parts)}</tbody>"
+    tbl   = (
+        f"<table style='border-collapse:collapse;width:100%;"
+        f"font-family:Consolas,monospace;font-size:0.85em;"
+        f"background:#1e1e1e;color:#d4d4d4;'>"
+        f"{thead}{tbody}</table>"
+    )
+    return (
+        f"<div style='margin-top:14px;overflow-x:auto'>"
+        f"<div style='color:#4fc3f7;font-weight:600;margin-bottom:8px;font-size:0.9em;"
+        f"font-family:Consolas,monospace;'>Results</div>"
+        f"{tbl}</div>"
+    )
+
+
+def _build_results_table_html(rows: dict) -> str:
+    """
+    Build an HTML table from parsed result rows.
+    Columns: VIN (V) | <label for each rail> | Status
+    """
+    if not rows:
+        return ""
+
+    # Collect ordered rail names and their display labels
+    rail_order:  list[str] = []
+    rail_labels: dict[str, str] = {}
+    for vin_data in rows.values():
+        for rail_name, info in vin_data.items():
+            if rail_name not in rail_order:
+                rail_order.append(rail_name)
+                rail_labels[rail_name] = info.get("label", rail_name)
+
+    # Build header row
+    th = "".join(f"<th style='{_TH_CSS}'>{h}</th>" for h in (
+        ["VIN (V)"] + [rail_labels[r] for r in rail_order] + ["Status"]
+    ))
+    thead = f"<thead><tr>{th}</tr></thead>"
+
+    # Sort VIN values numerically
+    try:
+        sorted_vins = sorted(rows.keys(), key=float)
+    except ValueError:
+        sorted_vins = sorted(rows.keys())
+
+    tbody_rows = []
+    for vin in sorted_vins:
+        vin_data   = rows[vin]
+        statuses   = [vin_data.get(r, {}).get("status", "?") for r in rail_order]
+        if all(s == "PASS" for s in statuses):
+            overall, s_css = "PASS", _PASS_CSS
+        elif any(s == "FAIL" for s in statuses):
+            overall, s_css = "FAIL", _FAIL_CSS
+        else:
+            overall, s_css = statuses[0] if len(statuses) == 1 else "?", _ERR_CSS
+
+        cells = f"<td style='{_TD_CSS}'>{vin}</td>"
+        for r in rail_order:
+            vout = vin_data.get(r, {}).get("vout")
+            cells += f"<td style='{_TD_CSS}'>{f'{vout:.4f}' if vout is not None else '—'}</td>"
+        cells += f"<td style='{_TD_CSS}{s_css}'>{overall}</td>"
+        tbody_rows.append(f"<tr>{cells}</tr>")
+
+    tbody = f"<tbody>{''.join(tbody_rows)}</tbody>"
+
+    return (
+        f"<div style='{_TBL_WRAP}'>"
+        f"<div style='{_TBL_TITLE}'>Results</div>"
+        f"<table style='{_TBL_CSS}'>{thead}{tbody}</table>"
+        f"</div>"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ↓ BELOW: CSS styling rules for Gradio UI elements (status box, buttons, layout)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ← CSS styling rules for Gradio components
 _CSS = """
-#status-box textarea {
-    font-size: 1.15em;                  /* ← Make status text larger */
-    font-weight: bold;                  /* ← Make status text bold */
-    text-align: center;                 /* ← Center-align status text */
+/* == Base ================================================================= */
+.gradio-container {
+    background : #020617 !important;
+    max-width  : 100%    !important;
+    padding    : 0       !important;
+    font-family: ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif !important;
 }
-#save-row { margin-top: 10px; }         /* ← Add space above save/delete buttons */
+footer { display:none !important; }
+.main  { padding:20px 24px !important; max-width:100% !important; }
+
+/* Strip Gradio's default block chrome */
+.block,.gr-block,.form {
+    background:transparent !important; border:none !important;
+    padding:0 !important; margin:0 !important; box-shadow:none !important;
+}
+
+/* == Inputs ================================================================ */
+textarea, input[type="text"], input[type="number"] {
+    background   : #0c1220 !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px    !important;
+    color        : #dde3ee !important;
+    font-size    : 0.87em  !important;
+    transition   : border-color .15s, box-shadow .15s !important;
+}
+textarea:focus, input:focus {
+    border-color : #3b82f6 !important;
+    box-shadow   : 0 0 0 3px rgba(59,130,246,.1) !important;
+    outline      : none    !important;
+}
+
+/* == Labels ================================================================ */
+label span, .label-wrap span {
+    color          : #2d3f5a !important;
+    font-size      : 0.71em  !important;
+    font-weight    : 700     !important;
+    text-transform : uppercase !important;
+    letter-spacing : 0.9px   !important;
+}
+
+/* == Dropdowns ============================================================= */
+select {
+    background   : #0c1220 !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px     !important;
+    color        : #dde3ee !important;
+}
+
+/* == Rail checkboxes ======================================================= */
+fieldset, .gr-checkbox-group {
+    background   : #0c1220 !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px !important;
+    padding      : 8px !important;
+}
+
+/* == RUN =================================================================== */
+#run-btn > button {
+    background    : #2563eb !important;
+    color         : #fff    !important;
+    border        : none    !important;
+    border-radius : 6px     !important;
+    font-weight   : 600     !important;
+    letter-spacing: 0.4px   !important;
+    transition    : background .15s, box-shadow .15s, transform .1s !important;
+    box-shadow    : 0 1px 2px rgba(0,0,0,.4),
+                    inset 0 1px 0 rgba(255,255,255,.07) !important;
+}
+#run-btn > button:hover  {
+    background : #3b82f6 !important;
+    box-shadow : 0 4px 14px rgba(59,130,246,.35) !important;
+}
+#run-btn > button:active { transform:scale(0.98) !important; }
+
+/* == STOP ================================================================== */
+#stop-btn > button {
+    background   : transparent !important;
+    color        : #334155     !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px  !important;
+    font-weight  : 600  !important;
+    transition   : all .15s !important;
+}
+#stop-btn > button:hover {
+    color        : #ef4444 !important;
+    border-color : rgba(239,68,68,.4) !important;
+    background   : rgba(239,68,68,.04) !important;
+}
+
+/* == Utility buttons ======================================================= */
+#browse-btn > button, #send-btn > button {
+    background   : transparent !important;
+    color        : #2d3f5a    !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px  !important;
+    font-size    : 0.83em !important;
+    transition   : all .15s !important;
+}
+#browse-btn > button:hover, #send-btn > button:hover {
+    color:#64748b !important; border-color:#2d3f5a !important;
+}
+
+/* == Keep ================================================================== */
+#keep-btn > button {
+    background   : transparent !important;
+    color        : #10b981    !important;
+    border       : 1px solid rgba(16,185,129,.25) !important;
+    border-radius: 6px !important;
+    font-weight  : 600 !important;
+    font-size    : .88em !important;
+    transition   : all .15s !important;
+}
+#keep-btn > button:hover {
+    background   : rgba(16,185,129,.06) !important;
+    border-color : rgba(16,185,129,.5) !important;
+}
+
+/* == Delete ================================================================ */
+#delete-btn > button {
+    background   : transparent !important;
+    color        : #334155     !important;
+    border       : 1px solid #1a2540 !important;
+    border-radius: 6px  !important;
+    font-weight  : 600  !important;
+    font-size    : .88em !important;
+    transition   : all .15s !important;
+}
+#delete-btn > button:hover {
+    color:#ef4444 !important; border-color:rgba(239,68,68,.3) !important;
+}
+
+/* == Save row ============================================================== */
+#save-row {
+    border       : 1px solid #1a2540 !important;
+    border-radius: 8px  !important;
+    padding      : 12px !important;
+    margin-top   : 14px !important;
+}
+
+/* == Animations ============================================================ */
+@keyframes dta-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ↓ BELOW: Constructs the web interface using Gradio framework
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Status pill ──────────────────────────────────────────────────────────────
+_STATUS_CFG: dict[str, tuple] = {
+    "Ready":   ("#2d3f5a", ""),
+    "Running": ("#3b82f6", "animation:dta-pulse 1.4s ease-in-out infinite;"),
+    "PASS":    ("#10b981", ""),
+    "FAIL":    ("#ef4444", ""),
+    "Error":   ("#f59e0b", ""),
+}
+
+def _status_html(status: str) -> str:
+    color, anim = _STATUS_CFG.get(status, _STATUS_CFG["Ready"])
+    return (
+        f"<div style='display:flex;align-items:center;gap:9px;"
+        f"padding:8px 14px;background:#0c1220;"
+        f"border:1px solid #1a2540;border-radius:6px;{anim}'>"
+        f"<div style='width:7px;height:7px;border-radius:50%;"
+        f"background:{color};box-shadow:0 0 7px {color};flex-shrink:0;'></div>"
+        f"<span style='color:{color};font-family:ui-monospace,Consolas,monospace;"
+        f"font-size:0.8em;font-weight:600;letter-spacing:2.5px;"
+        f"text-transform:uppercase;'>{status}</span></div>"
+    )
+
+def _section_header(title: str) -> str:
+    return (
+        f"<div style='color:#1e3050;font-size:0.63em;font-weight:700;"
+        f"text-transform:uppercase;letter-spacing:2px;"
+        f"padding:16px 0 7px 0;'>{title}</div>"
+    )
+
+_HEADER_HTML = (
+    "<div style='display:flex;align-items:center;gap:10px;"
+    "padding:0 0 18px 0;border-bottom:1px solid #0f1a2e;margin-bottom:2px;'>"
+    "<div style='width:7px;height:7px;border-radius:50%;background:#2563eb;"
+    "box-shadow:0 0 12px rgba(37,99,235,.8);flex-shrink:0;'></div>"
+    "<span style='color:#1e3050;font-size:0.7em;font-weight:700;"
+    "letter-spacing:2.5px;text-transform:uppercase;'>Digantara</span>"
+    "<span style='color:#0f1a2e;'> / </span>"
+    "<span style='color:#64748b;font-size:0.88em;font-weight:600;"
+    "letter-spacing:-0.2px;'>Test Automation</span>"
+    "</div>"
+)
 
 def build_gui() -> gr.Blocks:
     # ← Build the Gradio web interface with all controls and layouts
@@ -575,104 +962,79 @@ def build_gui() -> gr.Blocks:
     default_suites = get_suites_for_board(default_board) if default_board else []  # ← Get suites for default board
     default_suite  = default_suites[0] if default_suites else None  # ← Use first suite as default
 
-    with gr.Blocks(  # ← Create the main Gradio interface
-        title="Digantara Test Automation",  # ← Browser tab title
-        theme=gr.themes.Base(primary_hue="blue", neutral_hue="slate"),  # ← Set color theme (blue primary, slate neutral)
-        css=_CSS,  # ← Apply custom CSS styling
-    ) as demo:  # ← Store interface as 'demo' for later use
+    with gr.Blocks(
+        title="Digantara Test Automation",
+        theme=gr.themes.Base(primary_hue="blue", neutral_hue="slate"),
+        css=_CSS,
+    ) as demo:
 
-        # ← Display title and instructions
-        gr.Markdown(
-            "# Digantara Test Automation Framework\n"  # ← Main title
-            "Select a board and test suite, configure options, then click **Run**."  # ← Instructions
-        )
+        gr.HTML(value=_HEADER_HTML)
 
-        with gr.Row():  # ← Create horizontal layout for left and right panels
+        with gr.Row(equal_height=False):
 
-            # ── Left panel (Controls) ─────────────────────────────────────────
-            with gr.Column(scale=1, min_width=10):  # ← Left column with controls (1x width, min 300px)
+            # ── Left panel: config controls ────────────────────────────────
+            with gr.Column(scale=1, min_width=260):
 
-                # ← Board selection dropdown
                 board_dd = gr.Dropdown(
-                    choices=all_boards, value=default_board,  # ← Populate with boards
-                    label="Board Under Test",  # ← Label above dropdown
-                    info="Auto-detected from *_config.json files",  # ← Helpful info text
+                    choices=all_boards, value=default_board,
+                    label="Board Under Test",
+                    info="Auto-detected from *_config.json files",
                 )
-                
-                # ← Test suite selection dropdown
                 suite_dd = gr.Dropdown(
-                    choices=default_suites, value=default_suite,  # ← Populate with default suites
-                    label="Test Suite",  # ← Label above dropdown
-                    info="Only suites with a config for the selected board appear here",  # ← Helpful info
+                    choices=default_suites, value=default_suite,
+                    label="Test Suite",
+                    info="Only suites with a config for the selected board appear here",
                 )
+                instr_html = gr.HTML(value="")
 
-                # ← Required instruments sidebar widget
-                instr_html = gr.HTML(value="")  # ← Will be populated dynamically when board/suite changes
-
-                # ← Test mode dropdown (only visible for certain suites)
                 mode_dd = gr.Dropdown(
-                    choices=[], label="Test Mode", visible=False,  # ← Hidden by default, shown when suite supports modes
+                    choices=[], label="Mode", visible=False,
                 )
-                
-                # ← Voltage rails selection (only visible for certain suites)
                 rails_cb = gr.CheckboxGroup(
-                    choices=[], label="Rails to Test", visible=False,  # ← Hidden by default, shown when suite supports rails
+                    choices=[], label="Rails", visible=False,
                 )
 
-                # ← Output directory section
-                gr.Markdown("---")  # ← Visual separator
-                gr.Markdown("**Output Directory**")  # ← Section title
-
-                with gr.Row():  # ← Horizontal layout for textbox and button
+                gr.HTML(value=_section_header("Output"))
+                with gr.Row():
                     output_tb = gr.Textbox(
-                        value="gui_results",  # ← Default output directory
-                        placeholder="Folder path for results…",  # ← Placeholder text
-                        show_label=False,  # ← Don't show label (it's in Markdown above)
-                        lines=1,  # ← Single line textbox
-                        scale=4,  # ← Takes 4x space
+                        value="gui_results",
+                        placeholder="Results folder…",
+                        show_label=False, lines=1, scale=4,
                     )
-                    browse_btn = gr.Button("Browse…", scale=1, size="sm")  # ← Browse button (1x space, small size)
+                    browse_btn = gr.Button("Browse", scale=1, size="sm",
+                                           elem_id="browse-btn")
 
-                # ← Run/Stop buttons
-                gr.Markdown("---")  # ← Visual separator
+                gr.HTML(value="<div style='height:8px'></div>")
+                with gr.Row():
+                    run_btn  = gr.Button("Run",  variant="primary", size="lg",
+                                          elem_id="run-btn")
+                    stop_btn = gr.Button("Stop", variant="secondary", size="lg",
+                                          elem_id="stop-btn")
 
-                with gr.Row():  # ← Horizontal layout for buttons
-                    run_btn  = gr.Button("Run",  variant="primary", size="lg")  # ← Run button (primary color, large)
-                    stop_btn = gr.Button("Stop", variant="stop",    size="lg")  # ← Stop button (stop color, large)
+            # ── Right panel: output & results ──────────────────────────────
+            with gr.Column(scale=2):
 
-            # ── Right panel (Output & Status) ──────────────────────────────────
-            with gr.Column(scale=2):  # ← Right column (2x width of left column)
+                status_box = gr.HTML(value=_status_html("Ready"))
 
-                # ← Status display
-                status_tb = gr.Textbox(
-                    label="Status", value="Ready",  # ← Label and initial value
-                    interactive=False, lines=1,  # ← Read-only, single line
-                    elem_id="status-box",  # ← CSS ID for styling
-                )
+                gr.HTML(value="<div style='height:10px'></div>")
+                log_html = gr.HTML(value=_log_html([], "(No output yet)"))
 
-                # ← Test output log (HTML div with auto-scrolling)
-                # gr.HTML for the log — gives full scroll control via inline JS
-                log_html = gr.HTML(
-                    value=_log_html([], "(No output yet)"),  # ← Initial empty log message
-                    label="Test Output",  # ← Label
-                )
-
-                # ← Send box for answering in-test prompts
-                # Send box — unblocks any in-test input() prompts
-                with gr.Row():  # ← Horizontal layout
+                gr.HTML(value="<div style='height:6px'></div>")
+                with gr.Row():
                     send_tb = gr.Textbox(
-                        placeholder="Type a response and click Send  "  # ← Helpful placeholder
-                                    "(leave blank = press ENTER / continue probe prompt)",
-                        label="Send to test",  # ← Label
-                        lines=1, scale=5,  # ← Single line, takes 5x space
+                        placeholder="Press Send (or Enter) to continue — type here only if the test is asking a question",
+                        label="", lines=1, scale=5,
                     )
-                    send_btn = gr.Button("Send ↵", scale=1, size="sm")  # ← Send button (1x space, small)
+                    send_btn = gr.Button("Send", scale=1, size="sm",
+                                         elem_id="send-btn")
 
-                # ← Save/Delete buttons (hidden until test completes)
-                # Save / Delete — appears only after a test finishes
-                with gr.Row(elem_id="save-row", visible=False) as save_row:  # ← Horizontal row, initially hidden
-                    keep_btn   = gr.Button("Keep Results ✓",  variant="primary")  # ← Keep button (primary color)
-                    delete_btn = gr.Button("Delete Results ✗", variant="stop")  # ← Delete button (stop color)
+                results_html = gr.HTML(value="")
+
+                with gr.Row(elem_id="save-row", visible=False) as save_row:
+                    keep_btn   = gr.Button("Keep Results",   variant="primary",
+                                           elem_id="keep-btn")
+                    delete_btn = gr.Button("Delete Results", variant="stop",
+                                           elem_id="delete-btn")
 
         # ── Event handlers and wiring ──────────────────────────────────────────
 
@@ -716,9 +1078,9 @@ def build_gui() -> gr.Blocks:
 
         # ← Wire Run button to test launcher
         run_btn.click(
-            fn=launch_test,  # ← Call launch_test function
-            inputs=[board_dd, suite_dd, mode_dd, rails_cb, output_tb],  # ← Pass these inputs to function
-            outputs=[log_html, status_tb, save_row],  # ← Update these outputs from function
+            fn=launch_test,
+            inputs=[board_dd, suite_dd, mode_dd, rails_cb, output_tb],
+            outputs=[log_html, status_box, save_row, results_html],
         )
         
         # ← Wire Stop button to test stopper

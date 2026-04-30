@@ -1,0 +1,69 @@
+{
+    "_description": "Input Range and OVP Test Configuration — SENSOR Board",
+    "_objective": "Verify both buck regulator outputs (3.3 V and 3.6 V) remain within tolerance across the full specified input voltage operating range (4.5 V – 6.0 V). Each rail is probed in sequence: operator connects DMM to the 3.3 V rail first, all VIN test points are measured, then operator moves DMM to the 3.6 V rail and VIN points are repeated.",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "instrument_addresses": {
+        "_note": "VISA address strings for each instrument. Run 'python -m visa_auto_detect' to list detected addresses.",
+        "psu": "USB0::0x05E6::0x2230::805224014816710016::INSTR",
+        "dmm": "USB0::0x05E6::0x6500::04561287::INSTR"
+    },
+
+    "output_dir": {
+        "_note": "Base folder for results. A timestamped sub-folder is created automatically for each run.",
+        "path": "input_range_ovp_results"
+    },
+
+    "instrument_settings": {
+        "_note": "PSU channel selection (1, 2, or 3) and instrument communication timeouts (milliseconds).",
+        "psu_channel": 1,
+        "psu_timeout_ms": 10000,
+        "dmm_timeout_ms": 30000
+    },
+
+    "test_parameters": {
+        "_note": "Tunable test execution parameters. Sweep settings are kept for compatibility but the SENSOR multi-rail test runs fixed-VIN tests only — no sweep is performed.",
+        "psu_current_limit_a": 1.0,
+        "psu_ovp_level_v": 7.5,
+        "fixed_vin_settle_time_s": 1.0,
+        "sweep_start_v": 0.0,
+        "sweep_max_v": 6.5,
+        "sweep_step_v": 0.5,
+        "step_dwell_time_s": 1.0,
+        "dmm_read_interval_s": 0.5,
+        "step_settle_time_s": 0.3,
+        "sweep_vin_min_operating_v": 4.5,
+        "sweep_expected_vout_v": 3.3,
+        "sweep_vout_tolerance_v": 0.1,
+        "dmm_nplc": 0.2
+    },
+
+    "output_rails": [
+        {
+            "_note": "Phase 1: 3.3V buck output. Connect DMM probes to 3V3 rail before this phase begins.",
+            "name": "3V3",
+            "label": "VOUT 3.3(V)",
+            "test_point": "3V3",
+            "expected_vout_v": 3.3,
+            "vout_tolerance_v": 0.1
+        },
+        {
+            "_note": "Phase 2: 3.6V buck output. Move DMM probes to 3V6 rail before this phase begins.",
+            "name": "3V6",
+            "label": "VOUT 3.6(V)",
+            "test_point": "3V6",
+            "expected_vout_v": 3.6,
+            "vout_tolerance_v": 0.1
+        }
+    ],
+
+    "fixed_vin_tests": [
+        {
+            "_note": "VIN test points. expected_vout_v is supplied per rail from the output_rails section above — no need to repeat it here.",
+            "vin_v": 4.5
+        },
+        {"vin_v": 5.0},
+        {"vin_v": 5.5},
+        {"vin_v": 6.0}
+    ]
+}
