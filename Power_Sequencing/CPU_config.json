@@ -1,0 +1,125 @@
+{
+    "_description": "Power Sequencing Test Configuration",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "instrument_addresses": {
+        "_note": "VISA address strings for each instrument",
+        "psu":   "USB0::0x05E6::0x2230::805224014816710016::INSTR",
+        "scope": "USB0::0x0957::0x1780::MY65220169::INSTR"
+    },
+
+    "output_dir": {
+        "_note": "Full path where results should be saved. Use forward slashes.",
+        "path": "power_sequencing_results"
+    },
+
+    "psu_settings": {
+        "_note": "PSU channel and voltage for DUT input supply (5V rail)",
+        "channel":             1,
+        "vin_v":               5.0,
+        "current_limit_a":     2.0,
+        "ovp_level_v":         6.0,
+        "timeout_ms":          10000,
+        "pre_poweroff_wait_s": 2.0,
+        "post_poweron_wait_s": 0.5
+    },
+
+    "scope_settings": {
+        "_note": "Shared scope timing and coupling settings for both capture configurations",
+        "timebase_s_per_div":    5e-3,
+        "pretrigger_pct":        20,
+        "trigger_slope":         "POS",
+        "sweep_mode":            "NORMal",
+        "coupling":              "DC",
+        "probe_attenuation":     10.0,
+        "bandwidth_limit_20mhz": true,
+        "timeout_ms":            60000,
+        "trigger_wait_s":        15.0
+    },
+
+    "scope_config_1": {
+        "_note": "First capture: connect Ch1=1V0PL(TP8), Ch2=1V8(TP6), Ch3=1V0PS(TP5), Ch4=1V35(TP7). Confirm 3V6 with DMM.",
+        "trigger_channel": 1,
+        "channels": {
+            "1": {
+                "name":       "1V0PL",
+                "test_point": "TP8",
+                "nominal_v":  1.0,
+                "v_scale":    0.5,
+                "v_offset":   2.0
+            },
+            "2": {
+                "name":       "1V8",
+                "test_point": "TP6",
+                "nominal_v":  1.8,
+                "v_scale":    0.5,
+                "v_offset":   2.0
+            },
+            "3": {
+                "name":       "1V0PS",
+                "test_point": "TP5",
+                "nominal_v":  1.0,
+                "v_scale":    0.5,
+                "v_offset":   2.0
+            },
+            "4": {
+                "name":       "1V35",
+                "test_point": "TP7",
+                "nominal_v":  1.35,
+                "v_scale":    0.5,
+                "v_offset":   2.0
+            }
+        }
+    },
+
+    "scope_config_2": {
+        "_note": "Second capture: connect Ch1=2V5(TP9), Ch2=1V8(TP6), Ch3=3V3(TP10), Ch4=1V35(TP7).",
+        "trigger_channel": 1,
+        "channels": {
+            "1": {
+                "name":       "2V5",
+                "test_point": "TP9",
+                "nominal_v":  2.5,
+                "v_scale":    1,
+                "v_offset":   2
+            },
+            "2": {
+                "name":       "1V8",
+                "test_point": "TP6",
+                "nominal_v":  1.8,
+                "v_scale":    1,
+                "v_offset":   2
+            },
+            "3": {
+                "name":       "3V3",
+                "test_point": "TP10",
+                "nominal_v":  3.3,
+                "v_scale":    1,
+                "v_offset":   2
+            },
+            "4": {
+                "name":       "1V35",
+                "test_point": "TP7",
+                "nominal_v":  1.35,
+                "v_scale":    1,
+                "v_offset":   2
+            }
+        }
+    },
+
+    "rail_timing_limits": {
+        "_note": "Maximum allowed time (ms) for each rail to reach 90% of nominal. T=0 = rising edge of trigger channel.",
+        "1V0PL": {"max_time_ms": 5.0},
+        "1V0PS": {"max_time_ms": 5.0},
+        "1V8":   {"max_time_ms": 10.0},
+        "1V35":  {"max_time_ms": 15.0},
+        "2V5":   {"max_time_ms": 20.0},
+        "3V3":   {"max_time_ms": 25.0}
+    },
+
+    "dmm_3v6_check": {
+        "_note": "During Config 1, operator confirms 3V6 with DMM. Expected range (V).",
+        "expected_v":   3.6,
+        "tolerance_v":  0.1
+    }
+}

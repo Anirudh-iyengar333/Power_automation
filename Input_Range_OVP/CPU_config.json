@@ -1,0 +1,58 @@
+{
+    "_description": "Input Range and OVP Test Configuration",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "instrument_addresses": {
+        "_note": "VISA address strings for each instrument",
+        "psu": "USB0::0x05E6::0x2230::805224014816710016::INSTR",
+        "dmm": "USB0::0x05E6::0x6500::04561287::INSTR"
+    },
+
+    "output_dir": {
+        "_note": "Full path where results should be saved. Use forward slashes. Example: D:/Results/input_range_ovp",
+        "path": "input_range_ovp_results"
+    },
+
+    "instrument_settings": {
+        "_note": "PSU channel selection (1, 2, or 3) and instrument communication timeouts (milliseconds)",
+        "psu_channel": 1,
+        "psu_timeout_ms": 10000,
+        "dmm_timeout_ms": 30000
+    },
+
+    "test_parameters": {
+        "_note": "All tunable test execution parameters",
+        "psu_current_limit_a": 1.0,
+        "psu_ovp_level_v": 32.0,
+        "fixed_vin_settle_time_s": 1.0,
+        "sweep_start_v": 0.0,
+        "sweep_max_v": 28.0,
+        "sweep_step_v": 2.0,
+        "step_dwell_time_s": 1.0,
+        "dmm_read_interval_s": 0.5,
+        "step_settle_time_s": 0.3,
+        "sweep_vin_min_operating_v": 4.5,
+        "sweep_expected_vout_v": 3.6,
+        "sweep_vout_tolerance_v": 0.1,
+        "dmm_nplc": 0.2
+    },
+
+    "fixed_vin_tests": [
+        {
+            "_note": "Apply vin_v on PSU, wait, read DMM, check Vout vs expected_vout_v +/- vout_tolerance_v",
+            "vin_v": 4.5,
+            "expected_vout_v": 3.6,
+            "vout_tolerance_v": 0.1
+        },
+        {
+            "vin_v": 5.0,
+            "expected_vout_v": 3.6,
+            "vout_tolerance_v": 0.1
+        },
+        {
+            "vin_v": 28.0,
+            "expected_vout_v": 3.6,
+            "vout_tolerance_v": 0.1
+        }
+    ]
+}

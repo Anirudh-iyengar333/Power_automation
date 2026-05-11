@@ -1,0 +1,115 @@
+{
+    "_description": "Steady-State Rail Verification and Ripple Test Configuration",
+    "_instructions": "Edit values below instead of modifying the Python code. Re-run the test to pick up changes.",
+
+    "instrument_addresses": {
+        "_note": "VISA address strings for each instrument",
+        "psu":   "USB0::0x05E6::0x2230::805224014816710016::INSTR",
+        "scope": "USB0::0x0957::0x1780::MY65220169::INSTR"
+    },
+
+    "output_dir": {
+        "_note": "Full path where results should be saved. Use forward slashes.",
+        "path": "steady_state_ripple_results"
+    },
+
+    "psu_settings": {
+        "_note": "PSU channel and voltage for DUT input supply. DUT must already be running — this test does NOT power-cycle.",
+        "channel":         1,
+        "vin_v":           5.0,
+        "current_limit_a": 2.0,
+        "ovp_level_v":     6.0
+    },
+
+    "scope_settings": {
+        "_note": "Shared scope settings applied to all rail measurements. Scope CH1 is used for every rail (one at a time).",
+        "probe_attenuation":         1.0,
+        "bandwidth_limit_20mhz":     true,
+        "timeout_ms":                30000,
+
+        "dc_timebase_s_per_div":     0.01,
+        "_dc_note":                  "10 ms/div — wide enough to average switching noise for a clean DC RMS reading",
+
+        "ripple_timebase_s_per_div":  0.000001,
+        "ripple_v_scale_v_per_div":  0.05,
+        "ripple_coupling":           "AC",
+        "ripple_settle_periods":     3,
+        "_ripple_note":              "AC coupling, 50 mV/div, 100 ms/div. Script waits (ripple_settle_periods × 10 × timebase) seconds before stopping."
+    },
+
+    "rails": [
+        {
+            "name":            "5V_Input",
+            "test_point":      "PSU / TP",
+            "nominal_v":       5.0,
+            "min_v":           4.75,
+            "max_v":           5.25,
+            "dc_v_scale":      1.0,
+            "ripple_max_mvpp": null,
+            "_note": "Input supply rail — no ripple spec. Probe at PSU output terminal or board VIN connector."
+        },
+        {
+            "name":            "3V6",
+            "test_point":      "TP2",
+            "nominal_v":       3.6,
+            "min_v":           3.42,
+            "max_v":           3.78,
+            "dc_v_scale":      0.5,
+            "ripple_max_mvpp": 50.0
+        },
+        {
+            "name":            "3V3",
+            "test_point":      "TP10",
+            "nominal_v":       3.3,
+            "min_v":           3.14,
+            "max_v":           3.47,
+            "dc_v_scale":      0.5,
+            "ripple_max_mvpp": 50.0
+        },
+        {
+            "name":            "2V5",
+            "test_point":      "TP9",
+            "nominal_v":       2.5,
+            "min_v":           2.38,
+            "max_v":           2.63,
+            "dc_v_scale":      0.5,
+            "ripple_max_mvpp": 30.0
+        },
+        {
+            "name":            "1V8",
+            "test_point":      "TP6",
+            "nominal_v":       1.8,
+            "min_v":           1.71,
+            "max_v":           1.89,
+            "dc_v_scale":      0.2,
+            "ripple_max_mvpp": 30.0
+        },
+        {
+            "name":            "1V35",
+            "test_point":      "TP7",
+            "nominal_v":       1.35,
+            "min_v":           1.28,
+            "max_v":           1.42,
+            "dc_v_scale":      0.2,
+            "ripple_max_mvpp": 20.0
+        },
+        {
+            "name":            "1V_PS",
+            "test_point":      "TP5",
+            "nominal_v":       1.0,
+            "min_v":           0.95,
+            "max_v":           1.05,
+            "dc_v_scale":      0.2,
+            "ripple_max_mvpp": 20.0
+        },
+        {
+            "name":            "1V_PL",
+            "test_point":      "TP8",
+            "nominal_v":       1.0,
+            "min_v":           0.95,
+            "max_v":           1.05,
+            "dc_v_scale":      0.2,
+            "ripple_max_mvpp": 20.0
+        }
+    ]
+}
